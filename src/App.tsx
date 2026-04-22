@@ -11,7 +11,7 @@ import { countSyllables } from './gameService';
 
 const SAVE_KEY = 'no_big_word_v3';
 
-const playSound = (type: 'tick' | 'buzzer' | 'bop' | 'correct') => {
+const playSound = (type: 'tick' | 'buzzer' | 'penalty' | 'correct') => {
   const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
@@ -36,7 +36,7 @@ const playSound = (type: 'tick' | 'buzzer' | 'bop' | 'correct') => {
     gain.gain.linearRampToValueAtTime(0, now + 0.5);
     osc.start(now);
     osc.stop(now + 0.5);
-  } else if (type === 'bop') {
+  } else if (type === 'penalty') {
     osc.type = 'square';
     osc.frequency.setValueAtTime(150, now);
     osc.frequency.exponentialRampToValueAtTime(50, now + 0.2);
@@ -65,7 +65,7 @@ interface Participant {
   members: string[];
   score: number;
   totalCorrect: number;
-  totalBops: number;
+  totalPenalties: number;
 }
 
 const TEAM_COLORS = [
@@ -91,7 +91,7 @@ const TEAM_COLORS = [
   { name: 'Bronze', hex: '#cd7f32' }
 ];
 
-type FeedbackType = 'easy' | 'hard' | 'skip' | 'bop';
+type FeedbackType = 'easy' | 'hard' | 'skip' | 'penalty';
 
 export default function App() {
   const [isInitialized, setIsInitialized] = useState(false);
@@ -100,13 +100,14 @@ export default function App() {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [currentParticipantIndex, setCurrentParticipantIndex] = useState(0);
   const [roundsPerParticipant, setRoundsPerParticipant] = useState(2);
+  const [roundDuration, setRoundDuration] = useState(60);
   
   const [cards, setCards] = useState<CardItem[]>(INITIAL_CARDS);
   const [currentCardIndex, setCurrentCardIndex] = useState(0);
   const [timeLeft, setTimeLeft] = useState(60);
   const [roundPoints, setRoundPoints] = useState(0);
-  const [roundStats, setRoundStats] = useState({ easy: 0, hard: 0, skip: 0, bops: 0 });
-  const [isBopActive, setIsBopActive] = useState(false);
+  const [roundStats, setRoundStats] = useState({ easy: 0, hard: 0, skip: 0, penalties: 0 });
+  const [isPenaltyActive, setIsPenaltyActive] = useState(false);
   const [activeFeedback, setActiveFeedback] = useState<FeedbackType | null>(null);
   const [roundsPlayed, setRoundsPlayed] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
@@ -119,9 +120,14 @@ export default function App() {
         const data = JSON.parse(saved);
         setGameState(data.gameState || 'welcome');
         setGameMode(data.gameMode || 'teams');
-        setParticipants(data.participants || []);
+        const loadedParticipants = (data.participants || []).map((p: any) => ({
+          ...p,
+          totalPenalties: p.totalPenalties ?? 0
+        }));
+        setParticipants(loadedParticipants);
         setCurrentParticipantIndex(data.currentParticipantIndex || 0);
         setRoundsPerParticipant(data.roundsPerParticipant || 2);
+        setRoundDuration(data.roundDuration || 60);
         setCards(data.cards || INITIAL_CARDS);
         setCurrentCardIndex(data.currentCardIndex || 0);
         setRoundsPlayed(data.roundsPlayed || 0);
@@ -132,7 +138,7 @@ export default function App() {
           easy: savedStats.easy ?? 0,
           hard: savedStats.hard ?? 0,
           skip: savedStats.skip ?? 0,
-          bops: savedStats.bops ?? 0
+          penalties: savedStats.penalties ?? 0
         });
       } catch (e) {
         console.error("Failed to load saved game", e);
@@ -150,6 +156,7 @@ export default function App() {
       participants,
       currentParticipantIndex,
       roundsPerParticipant,
+      roundDuration,
       cards,
       currentCardIndex,
       roundsPlayed,
@@ -164,10 +171,11 @@ export default function App() {
 
   const maxTotalRounds = participants.length * roundsPerParticipant;
 
-  const handleSetupComplete = (mode: GameMode, parts: Participant[], totalRounds: number) => {
+  const handleSetupComplete = (mode: GameMode, parts: Participant[], totalRounds: number, duration: number) => {
     setGameMode(mode);
     setParticipants(parts);
     setRoundsPerParticipant(totalRounds);
+    setRoundDuration(duration);
     setRoundsPlayed(0);
     setCurrentParticipantIndex(0);
     setGameState('round_end');
@@ -175,8 +183,8 @@ export default function App() {
 
   const startRound = () => {
     setRoundPoints(0);
-    setRoundStats({ easy: 0, hard: 0, skip: 0, bops: 0 });
-    setTimeLeft(60);
+    setRoundStats({ easy: 0, hard: 0, skip: 0, penalties: 0 });
+    setTimeLeft(roundDuration);
     setGameState('playing');
     setCards(prev => [...prev].sort(() => Math.random() - 0.5));
     setCurrentCardIndex(0);
@@ -197,9 +205,9 @@ export default function App() {
         setRoundStats(prev => ({ ...prev, skip: prev.skip + 1 }));
         triggerFeedback('skip');
       } else {
-        setRoundStats(prev => ({ ...prev, bops: prev.bops + 1 }));
-        playSound('bop');
-        triggerFeedback('bop');
+        setRoundStats(prev => ({ ...prev, penalties: prev.penalties + 1 }));
+        playSound('penalty');
+        triggerFeedback('penalty');
       }
     }
     setCurrentCardIndex(prev => (prev + 1) % cards.length);
@@ -207,9 +215,9 @@ export default function App() {
 
   const triggerFeedback = (type: FeedbackType) => {
     setActiveFeedback(type);
-    if (type === 'bop') {
-      setIsBopActive(true);
-      setTimeout(() => setIsBopActive(false), 500);
+    if (type === 'penalty') {
+      setIsPenaltyActive(true);
+      setTimeout(() => setIsPenaltyActive(false), 500);
     }
     setTimeout(() => setActiveFeedback(null), 400);
   };
@@ -223,7 +231,7 @@ export default function App() {
     const totalWithLastSecond = finalRoundScore + lastMinutePoints;
     const roundCorrect = roundStats.easy + roundStats.hard;
     const finalCorrect = roundCorrect + (lastMinutePoints > 0 ? 1 : 0);
-    const finalBops = roundStats.bops + (lastMinutePoints < 0 ? 1 : 0);
+    const finalPenalties = roundStats.penalties + (lastMinutePoints < 0 ? 1 : 0);
 
     setParticipants(prev => prev.map((p, idx) => {
       if (idx === currentParticipantIndex) {
@@ -231,7 +239,7 @@ export default function App() {
           ...p,
           score: p.score + totalWithLastSecond,
           totalCorrect: p.totalCorrect + finalCorrect,
-          totalBops: p.totalBops + finalBops
+          totalPenalties: p.totalPenalties + finalPenalties
         };
       }
       return p;
@@ -285,7 +293,7 @@ export default function App() {
 
   const restartFullGame = () => {
     // Reset scores and rounds but keep participants
-    setParticipants(prev => prev.map(p => ({ ...p, score: 0, totalCorrect: 0, totalBops: 0 })));
+    setParticipants(prev => prev.map(p => ({ ...p, score: 0, totalCorrect: 0, totalPenalties: 0 })));
     setRoundsPlayed(0);
     setCurrentParticipantIndex(0);
     setGameState('round_end');
@@ -324,7 +332,7 @@ export default function App() {
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.9, y: 20 }}
-              className="w-full max-w-sm bg-white border-8 border-[#1a1a1a] rounded-[3rem] p-8 shadow-[12px_12px_0_#FF4500]"
+              className="w-full max-w-sm bg-white border-8 border-[#1a1a1a] rounded-[3rem] p-8 shadow-[12px_12px_0_#1a1a1a]"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex justify-between items-center mb-8">
@@ -355,23 +363,25 @@ export default function App() {
                   </button>
                 )}
 
-                <button 
-                  onClick={resetGame}
-                  className="w-full flex items-center gap-4 bg-red-50 text-red-600 p-4 rounded-3xl font-black uppercase tracking-tight text-lg border-4 border-red-200 hover:bg-red-100 transition-colors"
-                >
-                  <LogOut className="w-6 h-6" />
-                  Quit to Title
-                </button>
+                {gameState !== 'welcome' && (
+                  <button 
+                    onClick={resetGame}
+                    className="w-full flex items-center gap-4 bg-red-50 text-red-600 p-4 rounded-3xl font-black uppercase tracking-tight text-lg border-4 border-red-200 hover:bg-red-100 transition-colors"
+                  >
+                    <LogOut className="w-6 h-6" />
+                    Quit to Title
+                  </button>
+                )}
 
                 <button 
                   onClick={() => setShowSettings(false)}
-                  className="w-full bg-[#1a1a1a] text-white p-4 rounded-3xl font-black uppercase tracking-tight text-lg shadow-[0_4px_0_#4F46E5] active:translate-y-1 active:shadow-none transition-all mt-4"
+                  className="w-full bg-[#1a1a1a] text-white p-4 rounded-3xl font-black uppercase tracking-tight text-lg shadow-[0_4px_0_#1a1a1a] active:translate-y-1 active:shadow-none transition-all mt-4"
                 >
                   Close
                 </button>
 
                 <div className="mt-8 text-center text-[10px] font-black uppercase tracking-widest opacity-20">
-                  Version 1.0.1
+                  Version 1.0.2
                 </div>
               </div>
             </motion.div>
@@ -408,17 +418,18 @@ export default function App() {
             const nextParticipant = participants[nextIdx];
             
             let talkerName = "";
-            let bopperName = "";
+            let judgeName = "";
+            let judgeColor = nextParticipant?.color || "#E11D48";
             
             if (gameMode === 'solo') {
               talkerName = currentParticipant.name;
-              bopperName = nextParticipant?.name || 'Someone';
+              judgeName = nextParticipant?.name || 'Someone';
             } else {
               const talkerMemberIdx = currentLap % Math.max(1, currentParticipant.members.length);
               talkerName = currentParticipant.members[talkerMemberIdx] || currentParticipant.name;
               
-              const bopperMemberIdx = currentLap % Math.max(1, nextParticipant?.members.length || 1);
-              bopperName = nextParticipant?.members[bopperMemberIdx] || nextParticipant?.name || 'Someone';
+              const judgeMemberIdx = currentLap % Math.max(1, nextParticipant?.members.length || 1);
+              judgeName = nextParticipant?.members[judgeMemberIdx] || nextParticipant?.name || 'Someone';
             }
 
             return (
@@ -428,7 +439,8 @@ export default function App() {
                 roundNumber={currentLap + 1}
                 isSolo={gameMode === 'solo'}
                 talkerName={talkerName}
-                bopperName={bopperName}
+                judgeName={judgeName}
+                judgeColor={judgeColor}
               />
             );
           })()}
@@ -441,7 +453,7 @@ export default function App() {
               onNext={handleNextCard}
               participantName={currentParticipant?.name}
               participantColor={currentParticipant?.color}
-              isBopActive={isBopActive}
+              isPenaltyActive={isPenaltyActive}
             />
           )}
 
@@ -456,7 +468,7 @@ export default function App() {
         {activeFeedback && (
           <motion.div 
             initial={{ scale: 0.5, opacity: 0, rotate: -10 }}
-            animate={{ scale: 1.2, opacity: 1, rotate: activeFeedback === 'easy' ? 6 : activeFeedback === 'hard' ? -6 : activeFeedback === 'bop' ? 12 : 0 }}
+            animate={{ scale: 1.2, opacity: 1, rotate: activeFeedback === 'easy' ? 6 : activeFeedback === 'hard' ? -6 : activeFeedback === 'penalty' ? 12 : 0 }}
             exit={{ scale: 1.5, opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none"
           >
@@ -476,7 +488,7 @@ export default function App() {
 }
 
 function RoundConfirmationView({ roundPoints, roundStats, participants, currentIdx, onConfirm }: { 
-  roundPoints: number, roundStats: { easy: number, hard: number, skip: number, bops: number }, participants: Participant[], currentIdx: number, onConfirm: (p: number, extra: number) => void 
+  roundPoints: number, roundStats: { easy: number, hard: number, skip: number, penalties: number }, participants: Participant[], currentIdx: number, onConfirm: (p: number, extra: number) => void 
 }) {
   const [lastSecondAward, setLastSecondAward] = useState<0 | 1 | 3 | -1>(0);
   const currentP = participants[currentIdx];
@@ -484,7 +496,7 @@ function RoundConfirmationView({ roundPoints, roundStats, participants, currentI
   const displayPoints = roundPoints + lastSecondAward;
   const displayEasy = roundStats.easy + (lastSecondAward === 1 ? 1 : 0);
   const displayHard = roundStats.hard + (lastSecondAward === 3 ? 1 : 0);
-  const displayBops = roundStats.bops + (lastSecondAward === -1 ? 1 : 0);
+  const displayPenalties = roundStats.penalties + (lastSecondAward === -1 ? 1 : 0);
 
   return (
     <motion.div 
@@ -533,23 +545,23 @@ function RoundConfirmationView({ roundPoints, roundStats, participants, currentI
             <div className="text-[8px] font-black uppercase opacity-60">Skip</div>
           </div>
           <div className="text-center">
-            <div className={`text-xl font-black transition-colors ${lastSecondAward === -1 ? 'text-red-600 scale-110' : 'text-red-500'}`}>{displayBops || 0}</div>
-            <div className="text-[8px] font-black uppercase opacity-60">Bop</div>
+            <div className={`text-xl font-black transition-colors ${lastSecondAward === -1 ? 'text-red-600 scale-110' : 'text-red-500'}`}>{displayPenalties || 0}</div>
+            <div className="text-[8px] font-black uppercase opacity-60">Penalty</div>
           </div>
         </div>
       </div>
 
-      <div className="bg-white border-4 border-[#1a1a1a] rounded-[2rem] p-6 shadow-[8px_8px_0_#059669]">
+      <div className="bg-white border-4 border-[#1a1a1a] rounded-[2rem] p-6 shadow-[8px_8px_0_#1a1a1a]">
         <h3 className="text-xs font-black uppercase mb-4 text-center">Last Second Guess?</h3>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <button onClick={() => setLastSecondAward(0)} className={`py-3 rounded-xl font-black text-[10px] uppercase border-2 border-[#1a1a1a] transition-all ${lastSecondAward === 0 ? 'bg-[#1a1a1a] text-white shadow-inner translate-y-0.5' : 'bg-transparent text-[#1a1a1a]'}`}>No</button>
           <button onClick={() => setLastSecondAward(1)} className={`py-3 rounded-xl font-black text-[10px] uppercase border-2 border-[#1a1a1a] transition-all ${lastSecondAward === 1 ? 'bg-[#22c55e] text-white shadow-inner translate-y-0.5' : 'bg-transparent text-[#1a1a1a] border-[#22c55e]/30'}`}>Easy (+1)</button>
           <button onClick={() => setLastSecondAward(3)} className={`py-3 rounded-xl font-black text-[10px] uppercase border-2 border-[#1a1a1a] transition-all ${lastSecondAward === 3 ? 'bg-[#3b82f6] text-white shadow-inner translate-y-0.5' : 'bg-transparent text-[#1a1a1a] border-[#3b82f6]/30'}`}>Hard (+3)</button>
-          <button onClick={() => setLastSecondAward(-1)} className={`py-3 rounded-xl font-black text-[10px] uppercase border-2 border-[#1a1a1a] transition-all ${lastSecondAward === -1 ? 'bg-[#ef4444] text-white shadow-inner translate-y-0.5' : 'bg-transparent text-[#1a1a1a] border-[#ef4444]/30'}`}>Bop (-1)</button>
+          <button onClick={() => setLastSecondAward(-1)} className={`py-3 rounded-xl font-black text-[10px] uppercase border-2 border-[#1a1a1a] transition-all ${lastSecondAward === -1 ? 'bg-[#ef4444] text-white shadow-inner translate-y-0.5' : 'bg-transparent text-[#1a1a1a] border-[#ef4444]/30'}`}>Penalty (-1)</button>
         </div>
       </div>
 
-      <div className="flex-1 bg-[#1a1a1a] rounded-[2.5rem] p-6 text-white border-4 border-white shadow-xl overflow-y-auto max-h-[30vh] custom-scrollbar">
+      <div className="flex-1 bg-[#1a1a1a] rounded-[2.5rem] p-6 text-white border-4 border-white shadow-[8px_8px_0_#1a1a1a] overflow-y-auto max-h-[30vh] pr-4 no-scrollbar">
         <h4 className="text-center text-[10px] font-black uppercase tracking-widest mb-6 opacity-40">Overall Leaderboard</h4>
         <div className="space-y-4">
           {[...participants].sort((a, b) => {
@@ -582,9 +594,9 @@ function RoundConfirmationView({ roundPoints, roundStats, participants, currentI
 
       <button 
         onClick={() => onConfirm(roundPoints, lastSecondAward)}
-        className="bg-[#1a1a1a] text-white py-6 rounded-full font-black text-2xl uppercase tracking-tighter shadow-[0_8px_0_0_#4F46E5] active:translate-y-2 active:shadow-none transition-all flex items-center justify-center gap-2 border-2 border-white"
+        className="bg-[#1a1a1a] text-white py-6 rounded-full font-black text-2xl uppercase tracking-tighter shadow-[0_8px_0_0_#1a1a1a] active:translate-y-2 active:shadow-none transition-all flex items-center justify-center gap-2 border-2 border-white"
       >
-        Continue Hunt <ChevronRight className="w-6 h-6" />
+        Finish Turn <ChevronRight className="w-6 h-6" />
       </button>
     </motion.div>
   );
@@ -605,7 +617,7 @@ function WelcomeView({ onGoToSetup }: { onGoToSetup: () => void }) {
         <p className="text-sm font-mono uppercase tracking-[0.3em] text-[#1a1a1a] font-black">Syllable Challenge</p>
       </div>
 
-      <div className="bg-white border-[6px] border-[#1a1a1a] p-8 rounded-[3rem] shadow-[16px_16px_0px_0px_#4F46E5] space-y-6">
+      <div className="bg-white border-[6px] border-[#1a1a1a] p-8 rounded-[3rem] shadow-[8px_8px_0_0_#1a1a1a] space-y-6">
         <h2 className="text-3xl font-black flex items-center gap-2 uppercase italic text-[#1a1a1a]">
           <Info className="w-8 h-8 text-[#4F46E5]" /> Rules
         </h2>
@@ -620,23 +632,23 @@ function WelcomeView({ onGoToSetup }: { onGoToSetup: () => void }) {
           </li>
           <li className="flex gap-4 items-start">
             <span className="bg-[#059669] text-white w-8 h-8 rounded-xl flex items-center justify-center shrink-0 text-sm rotate-6">3</span>
-            <span className="leading-tight pt-1">Higher points for <strong className="text-[#059669] uppercase">Hard Targets</strong>. Win the hunt!</span>
+            <span className="leading-tight pt-1">Higher points for <strong className="text-[#059669] uppercase">Harder Words!</strong></span>
           </li>
         </ul>
       </div>
 
       <button 
         onClick={onGoToSetup}
-        className="w-full bg-[#1a1a1a] text-white py-8 rounded-full font-black text-4xl uppercase tracking-tighter shadow-[0_12px_0_0_#4F46E5] active:translate-y-2 active:shadow-none transition-all flex items-center justify-center gap-4 border-4 border-white"
+        className="w-full bg-[#1a1a1a] text-white py-8 rounded-full font-black text-4xl uppercase tracking-tighter shadow-[0_12px_0_0_#1a1a1a] active:translate-y-2 active:shadow-none transition-all flex items-center justify-center gap-4 border-4 border-white"
       >
-        Play Hunt <ChevronRight className="w-10 h-10" />
+        Setup Game <ChevronRight className="w-10 h-10" />
       </button>
     </motion.div>
   );
 }
 
-function RoundPromptView({ participant, onStart, roundNumber, isSolo, talkerName, bopperName }: { 
-  participant: Participant, onStart: () => void, roundNumber: number, isSolo: boolean, talkerName: string, bopperName: string 
+function RoundPromptView({ participant, onStart, roundNumber, isSolo, talkerName, judgeName, judgeColor }: { 
+  participant: Participant, onStart: () => void, roundNumber: number, isSolo: boolean, talkerName: string, judgeName: string, judgeColor: string 
 }) {
   return (
     <motion.div 
@@ -659,7 +671,7 @@ function RoundPromptView({ participant, onStart, roundNumber, isSolo, talkerName
         {!isSolo ? (
           <>
             <div className="flex flex-col items-center gap-3">
-              <div className="w-20 h-20 bg-white border-[6px] border-[#1a1a1a] rounded-[2rem] flex items-center justify-center shadow-[6px_6px_0_#C5B358] rotate-3" style={{ borderLeftColor: participant?.color, borderRightColor: participant?.color }}>
+              <div className="w-20 h-20 bg-white border-[6px] border-[#1a1a1a] rounded-[2rem] flex items-center justify-center rotate-3" style={{ borderLeftColor: participant?.color, borderRightColor: participant?.color, boxShadow: '6px 6px 0 #1a1a1a15' }}>
                 <Users className="w-10 h-10" style={{ color: participant?.color }} />
               </div>
               <div className="text-center">
@@ -668,12 +680,12 @@ function RoundPromptView({ participant, onStart, roundNumber, isSolo, talkerName
               </div>
             </div>
             <div className="flex flex-col items-center gap-3">
-              <div className="w-20 h-20 bg-white border-[6px] border-[#1a1a1a] rounded-[2rem] flex items-center justify-center shadow-[6px_6px_0_#E11D48] -rotate-3">
-                <Hammer className="w-10 h-10 text-[#E11D48]" />
+              <div className="w-20 h-20 bg-white border-[6px] border-[#1a1a1a] rounded-[2rem] flex items-center justify-center -rotate-3" style={{ borderLeftColor: judgeColor, borderRightColor: judgeColor, boxShadow: '6px 6px 0 #1a1a1a15' }}>
+                <Hammer className="w-10 h-10" style={{ color: judgeColor }} />
               </div>
               <div className="text-center">
-                <div className="text-[10px] font-black uppercase opacity-60">Bopper</div>
-                <div className="text-[12px] font-black uppercase tracking-tight">{bopperName}</div>
+                <div className="text-[10px] font-black uppercase opacity-60">Judge</div>
+                <div className="text-[12px] font-black uppercase tracking-tight">{judgeName}</div>
               </div>
             </div>
           </>
@@ -681,21 +693,21 @@ function RoundPromptView({ participant, onStart, roundNumber, isSolo, talkerName
           <div className="flex flex-col items-center gap-6">
             <div className="flex items-center gap-8">
               <div className="flex flex-col items-center gap-2">
-                <div className="w-24 h-24 bg-white border-[6px] border-[#1a1a1a] rounded-[2.5rem] flex items-center justify-center shadow-[8px_8px_0_#4F46E5] rotate-3">
+                <div className="w-24 h-24 bg-white border-[6px] border-[#1a1a1a] rounded-[2.5rem] flex items-center justify-center rotate-3" style={{ borderLeftColor: participant?.color, borderRightColor: participant?.color, boxShadow: '8px 8px 0 #1a1a1a15' }}>
                   <User className="w-12 h-12" style={{ color: participant?.color }} />
                 </div>
                 <div className="text-center">
-                  <div className="text-[10px] font-black uppercase opacity-60">The Hunter</div>
+                  <div className="text-[10px] font-black uppercase opacity-60">Talker</div>
                   <div className="text-[12px] font-black uppercase tracking-tight">{talkerName}</div>
                 </div>
               </div>
               <div className="flex flex-col items-center gap-2">
-                <div className="w-20 h-20 bg-white border-[6px] border-[#1a1a1a] rounded-[2.5rem] flex items-center justify-center shadow-[8px_8px_0_#E11D48] -rotate-3">
-                  <Hammer className="w-10 h-10 text-[#E11D48]" />
+                <div className="w-20 h-20 bg-white border-[6px] border-[#1a1a1a] rounded-[2.5rem] flex items-center justify-center -rotate-3" style={{ borderLeftColor: judgeColor, borderRightColor: judgeColor, boxShadow: '8px 8px 0 #1a1a1a15' }}>
+                  <Hammer className="w-10 h-10" style={{ color: judgeColor }} />
                 </div>
                 <div className="text-center">
-                  <div className="text-[10px] font-black uppercase opacity-60">The Bopper</div>
-                  <div className="text-[12px] font-black uppercase tracking-tight">{bopperName}</div>
+                  <div className="text-[10px] font-black uppercase opacity-60">Judge</div>
+                  <div className="text-[12px] font-black uppercase tracking-tight">{judgeName}</div>
                 </div>
               </div>
             </div>
@@ -705,16 +717,16 @@ function RoundPromptView({ participant, onStart, roundNumber, isSolo, talkerName
 
       <button 
         onClick={onStart}
-        className="bg-[#1a1a1a] text-white py-8 rounded-[2.5rem] font-black text-4xl uppercase tracking-tighter shadow-[0_10px_0_0_#4F46E5] active:translate-y-2 active:shadow-none transition-all border-4 border-white"
+        className="bg-[#1a1a1a] text-white py-8 rounded-[2.5rem] font-black text-4xl uppercase tracking-tighter shadow-[0_10px_0_0_#1a1a1a] active:translate-y-2 active:shadow-none transition-all border-4 border-white"
       >
-        Let's Rock!
+        Start Turn
       </button>
     </motion.div>
   );
 }
 
-function PlayView({ card, timeLeft, roundPoints, onNext, participantName, participantColor, isBopActive }: { 
-  card: CardItem, timeLeft: number, roundPoints: number, onNext: (p: number, skip?: boolean) => void, participantName: string, participantColor: string, isBopActive: boolean 
+function PlayView({ card, timeLeft, roundPoints, onNext, participantName, participantColor, isPenaltyActive }: { 
+  card: CardItem, timeLeft: number, roundPoints: number, onNext: (p: number, skip?: boolean) => void, participantName: string, participantColor: string, isPenaltyActive: boolean 
 }) {
   return (
     <motion.div 
@@ -723,7 +735,7 @@ function PlayView({ card, timeLeft, roundPoints, onNext, participantName, partic
       exit={{ opacity: 0 }}
       className="flex-1 flex flex-col gap-6"
     >
-      <div className="flex justify-between items-center bg-white p-4 rounded-[1.5rem] border-[4px] border-[#1a1a1a] shadow-[6px_6px_0_0_#1a1a1a]">
+      <div className="flex justify-between items-center bg-white p-4 rounded-[1.5rem] border-[4px] border-[#1a1a1a] shadow-[8px_8px_0_0_#1a1a1a]">
         <div className="flex items-center gap-2">
           <Timer className={`w-6 h-6 ${timeLeft < 10 ? 'text-red-500 animate-bounce' : 'text-[#4F46E5]'}`} />
           <span className={`font-mono text-2xl font-black ${timeLeft < 10 ? 'text-red-500' : 'text-[#1a1a1a]'}`}>{timeLeft}s</span>
@@ -739,10 +751,9 @@ function PlayView({ card, timeLeft, roundPoints, onNext, participantName, partic
 
       <motion.div 
         key={card.id}
-        initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.1 }}
-        className={`flex-1 bg-white border-[10px] border-[#1a1a1a] rounded-[3rem] flex flex-col overflow-hidden shadow-[16px_16px_0px_0px_#1a1a1a] relative transition-transform ${isBopActive ? 'shake' : ''}`}
+        className={`flex-1 bg-white border-[10px] border-[#1a1a1a] rounded-[3rem] flex flex-col overflow-hidden shadow-[8px_8px_0_0_#1a1a1a] relative transition-transform ${isPenaltyActive ? 'shake' : ''}`}
       >
         <div className="bg-[#1a1a1a] text-white p-3 text-center">
           <div className="text-[12px] uppercase font-black tracking-[0.3em]">NO BIG WORD</div>
@@ -778,7 +789,7 @@ function PlayView({ card, timeLeft, roundPoints, onNext, participantName, partic
           SKIP
         </button>
         <button onClick={() => onNext(-1)} className="col-span-1 bg-[#E11D48] text-white py-6 rounded-[2rem] font-black flex items-center justify-center gap-2 border-4 border-[#1a1a1a] shadow-[0_6px_0_0_#1a1a1a] active:translate-y-1 active:shadow-none transition-all text-xl uppercase tracking-tighter">
-          BOP!
+          PENALTY!
         </button>
       </div>
 
@@ -823,7 +834,7 @@ function GameOverView({ participants, onReset }: { participants: Participant[], 
         )}
       </div>
 
-      <div className="w-full space-y-4 max-h-[40vh] overflow-y-auto pr-2 custom-scrollbar">
+      <div className="w-full space-y-4 max-h-[40vh] overflow-y-auto pr-4 pb-6 no-scrollbar">
         {sorted.map((p, i) => (
           <div key={p.id} className="border-[6px] border-[#1a1a1a] p-6 rounded-[2.5rem] flex flex-col shadow-[8px_8px_0_#1a1a1a]" style={{ backgroundColor: p.color }}>
             <div className="flex justify-between items-center w-full mb-2">
@@ -835,7 +846,7 @@ function GameOverView({ participants, onReset }: { participants: Participant[], 
             </div>
             <div className="flex justify-start gap-4 text-[10px] font-black uppercase text-white/70">
               <span>{p.totalCorrect} Correct</span>
-              <span>{p.totalBops} Bops</span>
+              <span>{p.totalPenalties} Penalties</span>
             </div>
           </div>
         ))}
@@ -843,17 +854,18 @@ function GameOverView({ participants, onReset }: { participants: Participant[], 
 
       <button 
         onClick={onReset}
-        className="w-full bg-[#1a1a1a] text-white py-6 rounded-full font-black text-3xl uppercase tracking-tighter shadow-[0_8px_0_0_#4F46E5] active:translate-y-2 active:shadow-none transition-all flex items-center justify-center gap-4 mt-auto border-2 border-white"
+        className="w-full bg-[#1a1a1a] text-white py-6 rounded-full font-black text-3xl uppercase tracking-tighter shadow-[0_8px_0_0_#1a1a1a] active:translate-y-2 active:shadow-none transition-all flex items-center justify-center gap-4 mt-auto border-2 border-white"
       >
         <RotateCcw className="w-8 h-8" /> New Game
       </button>
     </motion.div>
   );
 }
-function SetupView({ onComplete, onBack }: { onComplete: (mode: GameMode, parts: Participant[], rounds: number) => void, onBack: () => void }) {
+function SetupView({ onComplete, onBack }: { onComplete: (mode: GameMode, parts: Participant[], rounds: number, duration: number) => void, onBack: () => void }) {
   const [mode, setMode] = useState<GameMode>('teams');
   const [count, setCount] = useState(2);
   const [rounds, setRounds] = useState(2);
+  const [duration, setDuration] = useState(60);
   const [names, setNames] = useState<string[]>(Array(20).fill(''));
   const [memberInputs, setMemberInputs] = useState<string[][]>(Array(20).fill(null).map(() => ['']));
 
@@ -868,10 +880,10 @@ function SetupView({ onComplete, onBack }: { onComplete: (mode: GameMode, parts:
         members: mode === 'teams' ? memberInputs[i].filter(m => m.trim() !== '') : [],
         score: 0,
         totalCorrect: 0,
-        totalBops: 0
+        totalPenalties: 0
       });
     }
-    onComplete(mode, participants, rounds);
+    onComplete(mode, participants, rounds, duration);
   };
 
   const updateMember = (pIdx: number, mIdx: number, val: string) => {
@@ -914,7 +926,7 @@ function SetupView({ onComplete, onBack }: { onComplete: (mode: GameMode, parts:
         </button>
       </div>
 
-      <div className="space-y-6 overflow-y-auto max-h-[60vh] pr-2 custom-scrollbar">
+      <div className="space-y-6 overflow-y-auto max-h-[60vh] pr-4 pb-8">
         <div className="space-y-3">
           <label className="text-[10px] font-black uppercase opacity-60 ml-2">Number of {mode === 'teams' ? 'Teams' : 'Players'}</label>
           <div className="flex items-center gap-4 bg-white border-4 border-[#1a1a1a] p-3 rounded-2xl justify-between">
@@ -933,10 +945,19 @@ function SetupView({ onComplete, onBack }: { onComplete: (mode: GameMode, parts:
           </div>
         </div>
 
+        <div className="space-y-3">
+          <label className="text-[10px] font-black uppercase opacity-60 ml-2">Round Duration (Seconds)</label>
+          <div className="flex items-center gap-4 bg-white border-4 border-[#1a1a1a] p-3 rounded-2xl justify-between">
+            <button onClick={() => setDuration(Math.max(10, duration - 10))} className="p-2 bg-[#1a1a1a] text-white rounded-lg active:scale-95"><Minus className="w-5 h-5"/></button>
+            <span className="text-2xl font-black">{duration}s</span>
+            <button onClick={() => setDuration(Math.min(180, duration + 10))} className="p-2 bg-[#1a1a1a] text-white rounded-lg active:scale-95"><Plus className="w-5 h-5"/></button>
+          </div>
+        </div>
+
         <div className="space-y-4">
           <label className="text-[10px] font-black uppercase opacity-60 ml-2">{mode === 'teams' ? 'Team' : 'Player'} Details</label>
           {Array.from({ length: count }).map((_, i) => (
-            <div key={i} className="bg-white border-4 border-[#1a1a1a] p-4 rounded-[2rem] shadow-[4px_4px_0_#1a1a1a] space-y-3">
+            <div key={i} className="bg-white border-4 border-[#1a1a1a] p-4 rounded-[2rem] shadow-[8px_8px_0_#1a1a1a] space-y-3">
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-full border-2 border-[#1a1a1a]" style={{ backgroundColor: TEAM_COLORS[i].hex }} />
                 <input 
@@ -974,9 +995,9 @@ function SetupView({ onComplete, onBack }: { onComplete: (mode: GameMode, parts:
 
       <button 
         onClick={handleStart}
-        className="w-full bg-[#1a1a1a] text-[#FFD700] py-6 rounded-full font-black text-3xl uppercase tracking-tighter shadow-[0_8px_0_0_#4F46E5] active:translate-y-2 active:shadow-none transition-all flex items-center justify-center gap-4 border-2 border-white mt-auto"
+        className="w-full bg-[#1a1a1a] text-[#FFD700] py-6 rounded-full font-black text-3xl uppercase tracking-tighter shadow-[0_8px_0_0_#1a1a1a] active:translate-y-2 active:shadow-none transition-all flex items-center justify-center gap-4 border-2 border-white mt-auto"
       >
-        Let's Play <ChevronRight className="w-8 h-8" />
+        Start Game <ChevronRight className="w-8 h-8" />
       </button>
     </motion.div>
   );

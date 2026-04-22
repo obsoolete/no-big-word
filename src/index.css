@@ -28,6 +28,15 @@
     background-color: #4F46E5;
   }
 
+  /* Utility to hide scrollbars */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none; /* IE and Edge */
+    scrollbar-width: none; /* Firefox */
+  }
+
   /* Firefox support */
   * {
     scrollbar-width: thin;
