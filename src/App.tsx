@@ -9,7 +9,51 @@ import { Timer, Trophy, Shield, Users, Info, ChevronRight, RotateCcw, AlertTrian
 import { INITIAL_CARDS, CardItem } from './constants';
 import { countSyllables } from './gameService';
 
-const SAVE_KEY = 'no_big_word_v1';
+const SAVE_KEY = 'no_big_word_v3';
+
+const playSound = (type: 'tick' | 'buzzer' | 'bop' | 'correct') => {
+  const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  
+  const now = ctx.currentTime;
+  
+  if (type === 'tick') {
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, now);
+    gain.gain.setValueAtTime(0.1, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.1);
+    osc.start(now);
+    osc.stop(now + 0.1);
+  } else if (type === 'buzzer') {
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(100, now);
+    osc.frequency.exponentialRampToValueAtTime(40, now + 0.5);
+    gain.gain.setValueAtTime(0.2, now);
+    gain.gain.linearRampToValueAtTime(0, now + 0.5);
+    osc.start(now);
+    osc.stop(now + 0.5);
+  } else if (type === 'bop') {
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(150, now);
+    osc.frequency.exponentialRampToValueAtTime(50, now + 0.2);
+    gain.gain.setValueAtTime(0.3, now);
+    gain.gain.linearRampToValueAtTime(0, now + 0.2);
+    osc.start(now);
+    osc.stop(now + 0.2);
+  } else if (type === 'correct') {
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(523.25, now); // C5
+    osc.frequency.exponentialRampToValueAtTime(1046.50, now + 0.2); // C6
+    gain.gain.setValueAtTime(0.1, now);
+    gain.gain.linearRampToValueAtTime(0, now + 0.2);
+    osc.start(now);
+    osc.stop(now + 0.2);
+  }
+};
 
 type GameMode = 'teams' | 'solo';
 type GameState = 'welcome' | 'setup' | 'playing' | 'confirming' | 'round_end' | 'game_over';
@@ -47,6 +91,8 @@ const TEAM_COLORS = [
   { name: 'Bronze', hex: '#cd7f32' }
 ];
 
+type FeedbackType = 'easy' | 'hard' | 'skip' | 'bop';
+
 export default function App() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [gameState, setGameState] = useState<GameState>('welcome');
@@ -59,8 +105,9 @@ export default function App() {
   const [currentCardIndex, setCurrentCardIndex] = useState(0);
   const [timeLeft, setTimeLeft] = useState(60);
   const [roundPoints, setRoundPoints] = useState(0);
-  const [roundStats, setRoundStats] = useState({ correct: 0, bops: 0 });
+  const [roundStats, setRoundStats] = useState({ easy: 0, hard: 0, skip: 0, bops: 0 });
   const [isBopActive, setIsBopActive] = useState(false);
+  const [activeFeedback, setActiveFeedback] = useState<FeedbackType | null>(null);
   const [roundsPlayed, setRoundsPlayed] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
 
@@ -80,7 +127,13 @@ export default function App() {
         setRoundsPlayed(data.roundsPlayed || 0);
         setTimeLeft(data.timeLeft ?? 60);
         setRoundPoints(data.roundPoints ?? 0);
-        setRoundStats(data.roundStats ?? { correct: 0, bops: 0 });
+        const savedStats = data.roundStats || {};
+        setRoundStats({
+          easy: savedStats.easy ?? 0,
+          hard: savedStats.hard ?? 0,
+          skip: savedStats.skip ?? 0,
+          bops: savedStats.bops ?? 0
+        });
       } catch (e) {
         console.error("Failed to load saved game", e);
       }
@@ -122,29 +175,43 @@ export default function App() {
 
   const startRound = () => {
     setRoundPoints(0);
-    setRoundStats({ correct: 0, bops: 0 });
+    setRoundStats({ easy: 0, hard: 0, skip: 0, bops: 0 });
     setTimeLeft(60);
     setGameState('playing');
     setCards(prev => [...prev].sort(() => Math.random() - 0.5));
     setCurrentCardIndex(0);
   };
 
-  const handleNextCard = (points: number) => {
+  const handleNextCard = (points: number, isSkip = false) => {
     setRoundPoints(prev => prev + points);
-    if (points > 0) {
-      setRoundStats(prev => ({ ...prev, correct: prev.correct + 1 }));
+    if (points === 1) {
+      setRoundStats(prev => ({ ...prev, easy: prev.easy + 1 }));
+      playSound('correct');
+      triggerFeedback('easy');
+    } else if (points === 3) {
+      setRoundStats(prev => ({ ...prev, hard: prev.hard + 1 }));
+      playSound('correct');
+      triggerFeedback('hard');
     } else if (points < 0) {
-      setRoundStats(prev => ({ ...prev, bops: prev.bops + 1 }));
+      if (isSkip) {
+        setRoundStats(prev => ({ ...prev, skip: prev.skip + 1 }));
+        triggerFeedback('skip');
+      } else {
+        setRoundStats(prev => ({ ...prev, bops: prev.bops + 1 }));
+        playSound('bop');
+        triggerFeedback('bop');
+      }
     }
     setCurrentCardIndex(prev => (prev + 1) % cards.length);
-    if (points < 0) {
-      triggerBop();
-    }
   };
 
-  const triggerBop = () => {
-    setIsBopActive(true);
-    setTimeout(() => setIsBopActive(false), 500);
+  const triggerFeedback = (type: FeedbackType) => {
+    setActiveFeedback(type);
+    if (type === 'bop') {
+      setIsBopActive(true);
+      setTimeout(() => setIsBopActive(false), 500);
+    }
+    setTimeout(() => setActiveFeedback(null), 400);
   };
 
   const endRound = useCallback(() => {
@@ -154,7 +221,9 @@ export default function App() {
 
   const confirmRoundResults = (finalRoundScore: number, lastMinutePoints: number) => {
     const totalWithLastSecond = finalRoundScore + lastMinutePoints;
-    const finalCorrect = roundStats.correct + (lastMinutePoints > 0 ? 1 : 0);
+    const roundCorrect = roundStats.easy + roundStats.hard;
+    const finalCorrect = roundCorrect + (lastMinutePoints > 0 ? 1 : 0);
+    const finalBops = roundStats.bops + (lastMinutePoints < 0 ? 1 : 0);
 
     setParticipants(prev => prev.map((p, idx) => {
       if (idx === currentParticipantIndex) {
@@ -162,7 +231,7 @@ export default function App() {
           ...p,
           score: p.score + totalWithLastSecond,
           totalCorrect: p.totalCorrect + finalCorrect,
-          totalBops: p.totalBops + roundStats.bops
+          totalBops: p.totalBops + finalBops
         };
       }
       return p;
@@ -183,9 +252,16 @@ export default function App() {
   useEffect(() => {
     if (gameState === 'playing' && timeLeft > 0) {
       timerRef.current = setInterval(() => {
-        setTimeLeft(prev => prev - 1);
+        setTimeLeft(prev => {
+          const nextTime = prev - 1;
+          if (nextTime <= 5 && nextTime > 0) {
+            playSound('tick');
+          }
+          return nextTime;
+        });
       }, 1000);
     } else if (timeLeft === 0 && gameState === 'playing') {
+      playSound('buzzer');
       endRound();
     }
     return () => {
@@ -293,6 +369,10 @@ export default function App() {
                 >
                   Close
                 </button>
+
+                <div className="mt-8 text-center text-[10px] font-black uppercase tracking-widest opacity-20">
+                  Version 1.0.1
+                </div>
               </div>
             </motion.div>
           </motion.div>
@@ -371,17 +451,22 @@ export default function App() {
         </AnimatePresence>
       </main>
 
-      {/* BOP OVERLAY */}
+      {/* FEEDBACK OVERLAY */}
       <AnimatePresence>
-        {isBopActive && (
+        {activeFeedback && (
           <motion.div 
-            initial={{ scale: 0.5, opacity: 0 }}
-            animate={{ scale: 1.5, opacity: 1 }}
-            exit={{ scale: 2, opacity: 0 }}
+            initial={{ scale: 0.5, opacity: 0, rotate: -10 }}
+            animate={{ scale: 1.2, opacity: 1, rotate: activeFeedback === 'easy' ? 6 : activeFeedback === 'hard' ? -6 : activeFeedback === 'bop' ? 12 : 0 }}
+            exit={{ scale: 1.5, opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none"
           >
-            <div className="bg-red-600 text-white px-12 py-6 rounded-full font-black text-6xl shadow-2xl rotate-12 border-8 border-white tracking-tighter">
-              BOP!
+            <div className={`px-12 py-6 rounded-full font-black text-6xl shadow-2xl border-8 border-white tracking-tighter ${
+              activeFeedback === 'easy' ? 'bg-[#22c55e] text-white shadow-[#166534]' : 
+              activeFeedback === 'hard' ? 'bg-[#3b82f6] text-white shadow-[#1e40af]' : 
+              activeFeedback === 'skip' ? 'bg-gray-500 text-white shadow-gray-700' : 
+              'bg-red-600 text-white shadow-red-900'
+            }`}>
+              {activeFeedback.toUpperCase()}!
             </div>
           </motion.div>
         )}
@@ -391,10 +476,15 @@ export default function App() {
 }
 
 function RoundConfirmationView({ roundPoints, roundStats, participants, currentIdx, onConfirm }: { 
-  roundPoints: number, roundStats: any, participants: Participant[], currentIdx: number, onConfirm: (p: number, extra: number) => void 
+  roundPoints: number, roundStats: { easy: number, hard: number, skip: number, bops: number }, participants: Participant[], currentIdx: number, onConfirm: (p: number, extra: number) => void 
 }) {
-  const [lastSecondAward, setLastSecondAward] = useState<0 | 1 | 3>(0);
+  const [lastSecondAward, setLastSecondAward] = useState<0 | 1 | 3 | -1>(0);
   const currentP = participants[currentIdx];
+
+  const displayPoints = roundPoints + lastSecondAward;
+  const displayEasy = roundStats.easy + (lastSecondAward === 1 ? 1 : 0);
+  const displayHard = roundStats.hard + (lastSecondAward === 3 ? 1 : 0);
+  const displayBops = roundStats.bops + (lastSecondAward === -1 ? 1 : 0);
 
   return (
     <motion.div 
@@ -406,43 +496,87 @@ function RoundConfirmationView({ roundPoints, roundStats, participants, currentI
         <div className="inline-block px-4 py-1 rounded-full text-[10px] font-black text-white uppercase mb-2" style={{ backgroundColor: currentP?.color || '#1a1a1a' }}>
           {currentP?.name}'s Result
         </div>
-        <h2 className="text-4xl sm:text-5xl font-black uppercase tracking-tighter text-[#1a1a1a] drop-shadow-[0_4px_0_#4F46E5]">
+        <h2 className="text-4xl sm:text-5xl font-black uppercase tracking-tighter text-[#1a1a1a]">
           Turn Over!
         </h2>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="bg-white border-4 border-[#1a1a1a] rounded-[2rem] p-6 text-center shadow-[6px_6px_0_#1a1a1a]">
-          <div className="text-4xl font-black text-[#4F46E5]">{roundPoints}</div>
-          <div className="text-[10px] font-black uppercase opacity-60">Points Won</div>
+      <div className="bg-white border-4 border-[#1a1a1a] rounded-[2rem] p-8 text-center shadow-[8px_8px_0_#1a1a1a] relative overflow-hidden transition-colors">
+        <div className="text-6xl font-black text-[#4F46E5] relative z-10 transition-transform">
+          {displayPoints}
         </div>
-        <div className="bg-white border-4 border-[#1a1a1a] rounded-[2rem] p-6 text-center shadow-[6px_6px_0_#1a1a1a]">
-          <div className="text-4xl font-black text-[#E11D48]">{roundStats.bops}</div>
-          <div className="text-[10px] font-black uppercase opacity-60">Total Bops</div>
+        <div className="text-xs font-black uppercase opacity-60 relative z-10">Points Won This Turn</div>
+        {lastSecondAward !== 0 && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.5 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className={`absolute top-4 right-8 text-2xl font-black ${lastSecondAward > 0 ? 'text-green-500' : 'text-red-500'}`}
+          >
+            {lastSecondAward > 0 ? '+' : ''}{lastSecondAward}
+          </motion.div>
+        )}
+      </div>
+
+      <div className="bg-white border-4 border-[#1a1a1a] rounded-[2rem] p-4 shadow-[8px_8px_0_#1a1a1a]">
+        <h3 className="text-[10px] font-black uppercase mb-3 text-center opacity-40 italic">Round Statistics</h3>
+        <div className="grid grid-cols-4 gap-2">
+          <div className="text-center">
+            <div className={`text-xl font-black transition-colors ${lastSecondAward === 1 ? 'text-green-600 scale-110' : 'text-[#22c55e]'}`}>{displayEasy || 0}</div>
+            <div className="text-[8px] font-black uppercase opacity-60">Easy</div>
+          </div>
+          <div className="text-center">
+            <div className={`text-xl font-black transition-colors ${lastSecondAward === 3 ? 'text-blue-600 scale-110' : 'text-[#3b82f6]'}`}>{displayHard || 0}</div>
+            <div className="text-[8px] font-black uppercase opacity-60">Hard</div>
+          </div>
+          <div className="text-center">
+            <div className="text-xl font-black text-gray-400">{roundStats.skip || 0}</div>
+            <div className="text-[8px] font-black uppercase opacity-60">Skip</div>
+          </div>
+          <div className="text-center">
+            <div className={`text-xl font-black transition-colors ${lastSecondAward === -1 ? 'text-red-600 scale-110' : 'text-red-500'}`}>{displayBops || 0}</div>
+            <div className="text-[8px] font-black uppercase opacity-60">Bop</div>
+          </div>
         </div>
       </div>
 
       <div className="bg-white border-4 border-[#1a1a1a] rounded-[2rem] p-6 shadow-[8px_8px_0_#059669]">
         <h3 className="text-xs font-black uppercase mb-4 text-center">Last Second Guess?</h3>
-        <div className="grid grid-cols-3 gap-2">
-          <button onClick={() => setLastSecondAward(0)} className={`py-3 rounded-xl font-black text-[10px] uppercase border-2 border-[#1a1a1a] transition-all ${lastSecondAward === 0 ? 'bg-[#1a1a1a] text-white' : 'bg-transparent text-[#1a1a1a]'}`}>Wait</button>
-          <button onClick={() => setLastSecondAward(1)} className={`py-3 rounded-xl font-black text-[10px] uppercase border-2 border-[#1a1a1a] transition-all ${lastSecondAward === 1 ? 'bg-[#4F46E5] text-white' : 'bg-transparent text-[#1a1a1a]'}`}>Easy (+1)</button>
-          <button onClick={() => setLastSecondAward(3)} className={`py-3 rounded-xl font-black text-[10px] uppercase border-2 border-[#1a1a1a] transition-all ${lastSecondAward === 3 ? 'bg-[#059669] text-white' : 'bg-transparent text-[#1a1a1a]'}`}>Hard (+3)</button>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <button onClick={() => setLastSecondAward(0)} className={`py-3 rounded-xl font-black text-[10px] uppercase border-2 border-[#1a1a1a] transition-all ${lastSecondAward === 0 ? 'bg-[#1a1a1a] text-white shadow-inner translate-y-0.5' : 'bg-transparent text-[#1a1a1a]'}`}>No</button>
+          <button onClick={() => setLastSecondAward(1)} className={`py-3 rounded-xl font-black text-[10px] uppercase border-2 border-[#1a1a1a] transition-all ${lastSecondAward === 1 ? 'bg-[#22c55e] text-white shadow-inner translate-y-0.5' : 'bg-transparent text-[#1a1a1a] border-[#22c55e]/30'}`}>Easy (+1)</button>
+          <button onClick={() => setLastSecondAward(3)} className={`py-3 rounded-xl font-black text-[10px] uppercase border-2 border-[#1a1a1a] transition-all ${lastSecondAward === 3 ? 'bg-[#3b82f6] text-white shadow-inner translate-y-0.5' : 'bg-transparent text-[#1a1a1a] border-[#3b82f6]/30'}`}>Hard (+3)</button>
+          <button onClick={() => setLastSecondAward(-1)} className={`py-3 rounded-xl font-black text-[10px] uppercase border-2 border-[#1a1a1a] transition-all ${lastSecondAward === -1 ? 'bg-[#ef4444] text-white shadow-inner translate-y-0.5' : 'bg-transparent text-[#1a1a1a] border-[#ef4444]/30'}`}>Bop (-1)</button>
         </div>
       </div>
 
-      <div className="flex-1 bg-[#1a1a1a] rounded-[2.5rem] p-6 text-[#FFD700] border-4 border-white shadow-xl overflow-y-auto max-h-[30vh] custom-scrollbar">
-        <h4 className="text-center text-[10px] font-black uppercase tracking-widest mb-6 opacity-60">Overall Leaderboard</h4>
+      <div className="flex-1 bg-[#1a1a1a] rounded-[2.5rem] p-6 text-white border-4 border-white shadow-xl overflow-y-auto max-h-[30vh] custom-scrollbar">
+        <h4 className="text-center text-[10px] font-black uppercase tracking-widest mb-6 opacity-40">Overall Leaderboard</h4>
         <div className="space-y-4">
-          {[...participants].sort((a, b) => b.score - a.score).map((p, i) => (
-            <div key={p.id} className="flex justify-between items-center">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full border-2 border-white flex items-center justify-center font-black text-[8px]" style={{ backgroundColor: p.color }}>{i+1}</div>
-                <span className="font-black uppercase tracking-tight text-xs">{p.name}</span>
+          {[...participants].sort((a, b) => {
+            const scoreA = a.id === currentP?.id ? a.score + displayPoints : a.score;
+            const scoreB = b.id === currentP?.id ? b.score + displayPoints : b.score;
+            return scoreB - scoreA;
+          }).map((p, i) => {
+            const isCurrent = p.id === currentP?.id;
+            return (
+              <div key={p.id} className={`flex justify-between items-center transition-all ${isCurrent ? 'scale-105' : 'opacity-80'}`}>
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full border-2 border-white flex items-center justify-center font-black text-[8px]" style={{ backgroundColor: p.color }}>{i+1}</div>
+                  <span className={`font-black uppercase tracking-tight text-xs ${isCurrent ? 'text-[#FFD700]' : 'text-white'}`}>{p.name}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {isCurrent && (
+                    <span className="text-[10px] font-black opacity-60 text-[#FFD700]">
+                      {p.score} + {displayPoints} =
+                    </span>
+                  )}
+                  <span className={`text-xl font-black ${isCurrent ? 'text-[#FFD700]' : 'text-white'}`}>
+                    {isCurrent ? p.score + displayPoints : p.score}
+                  </span>
+                </div>
               </div>
-              <span className="text-xl font-black">{p.score}</span>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -580,7 +714,7 @@ function RoundPromptView({ participant, onStart, roundNumber, isSolo, talkerName
 }
 
 function PlayView({ card, timeLeft, roundPoints, onNext, participantName, participantColor, isBopActive }: { 
-  card: CardItem, timeLeft: number, roundPoints: number, onNext: (p: number) => void, participantName: string, participantColor: string, isBopActive: boolean 
+  card: CardItem, timeLeft: number, roundPoints: number, onNext: (p: number, skip?: boolean) => void, participantName: string, participantColor: string, isBopActive: boolean 
 }) {
   return (
     <motion.div 
@@ -605,17 +739,18 @@ function PlayView({ card, timeLeft, roundPoints, onNext, participantName, partic
 
       <motion.div 
         key={card.id}
-        initial={{ y: 500, rotate: 15, opacity: 0 }}
-        animate={{ y: 0, rotate: 0, opacity: 1 }}
-        className={`flex-1 bg-white border-[10px] border-[#1a1a1a] rounded-[3rem] flex flex-col overflow-hidden shadow-[16px_16px_0px_0px_#4F46E5] relative transition-transform ${isBopActive ? 'shake' : ''}`}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.1 }}
+        className={`flex-1 bg-white border-[10px] border-[#1a1a1a] rounded-[3rem] flex flex-col overflow-hidden shadow-[16px_16px_0px_0px_#1a1a1a] relative transition-transform ${isBopActive ? 'shake' : ''}`}
       >
-        <div className="bg-[#4F46E5] text-white p-3 text-center">
+        <div className="bg-[#1a1a1a] text-white p-3 text-center">
           <div className="text-[12px] uppercase font-black tracking-[0.3em]">NO BIG WORD</div>
         </div>
         
         <div className="flex-1 flex flex-col items-center justify-center p-8 gap-10">
           <div className="text-center">
-            <div className="inline-block bg-[#1a1a1a] text-white px-3 py-0.5 rounded text-[10px] font-black uppercase mb-3">Easy (1 Point)</div>
+            <div className="inline-block bg-[#22c55e] text-white px-3 py-0.5 rounded text-[10px] font-black uppercase mb-3">Easy (1 Point)</div>
             <div className="text-5xl font-black text-[#1a1a1a] tracking-tighter uppercase leading-none break-words">
               {card.word}
             </div>
@@ -624,7 +759,7 @@ function PlayView({ card, timeLeft, roundPoints, onNext, participantName, partic
           <div className="w-1/2 h-2 bg-[#1a1a1a] rounded-full opacity-10" />
 
           <div className="text-center">
-            <div className="inline-block bg-[#E11D48] text-white px-3 py-0.5 rounded text-[10px] font-black uppercase mb-3">Hard (3 Points)</div>
+            <div className="inline-block bg-[#3b82f6] text-white px-3 py-0.5 rounded text-[10px] font-black uppercase mb-3">Hard (3 Points)</div>
             <div className="text-3xl font-black text-slate-600 leading-tight italic">
               {card.phrase}
             </div>
@@ -632,15 +767,18 @@ function PlayView({ card, timeLeft, roundPoints, onNext, participantName, partic
         </div>
 
         <div className="p-4 bg-yellow-50 text-center text-[11px] uppercase font-black text-[#1a1a1a] border-t-[4px] border-[#1a1a1a]">
-          SHHH! ONE SYLLABLE ONLY!
+          ONE SYLLABLE WORDS ONLY!
         </div>
       </motion.div>
 
       <div className="grid grid-cols-2 gap-4 pb-8">
-        <button onClick={() => onNext(1)} className="bg-[#4F46E5] text-white py-6 rounded-[2rem] font-black text-2xl uppercase tracking-tighter border-4 border-[#1a1a1a] shadow-[0_6px_0_0_#1a1a1a] active:translate-y-1 active:shadow-none transition-all">EASY</button>
-        <button onClick={() => onNext(3)} className="bg-[#059669] text-white py-6 rounded-[2rem] font-black text-2xl uppercase tracking-tighter border-4 border-[#1a1a1a] shadow-[0_6px_0_0_#1a1a1a] active:translate-y-1 active:shadow-none transition-all">HARD</button>
-        <button onClick={() => onNext(-1)} className="col-span-2 bg-[#E11D48] text-white py-6 rounded-[2rem] font-black flex items-center justify-center gap-4 border-4 border-[#1a1a1a] shadow-[0_8px_0_0_#1a1a1a] active:translate-y-1 active:shadow-none transition-all">
-          <AlertTriangle className="w-10 h-10" /> <span className="text-4xl uppercase tracking-tighter">PENALTY</span>
+        <button onClick={() => onNext(1)} className="bg-[#22c55e] text-white py-6 rounded-[2rem] font-black text-2xl uppercase tracking-tighter border-4 border-[#1a1a1a] shadow-[0_6px_0_0_#1a1a1a] active:translate-y-1 active:shadow-none transition-all">EASY</button>
+        <button onClick={() => onNext(3)} className="bg-[#3b82f6] text-white py-6 rounded-[2rem] font-black text-2xl uppercase tracking-tighter border-4 border-[#1a1a1a] shadow-[0_6px_0_0_#1a1a1a] active:translate-y-1 active:shadow-none transition-all">HARD</button>
+        <button onClick={() => onNext(-1, true)} className="col-span-1 bg-white text-[#1a1a1a] py-6 rounded-[2rem] font-black flex items-center justify-center gap-2 border-4 border-[#1a1a1a] shadow-[0_6px_0_0_#1a1a1a] active:translate-y-1 active:shadow-none transition-all text-xl uppercase tracking-tighter">
+          SKIP
+        </button>
+        <button onClick={() => onNext(-1)} className="col-span-1 bg-[#E11D48] text-white py-6 rounded-[2rem] font-black flex items-center justify-center gap-2 border-4 border-[#1a1a1a] shadow-[0_6px_0_0_#1a1a1a] active:translate-y-1 active:shadow-none transition-all text-xl uppercase tracking-tighter">
+          BOP!
         </button>
       </div>
 
@@ -652,9 +790,6 @@ function PlayView({ card, timeLeft, roundPoints, onNext, participantName, partic
           30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
           40%, 60% { transform: translate3d(4px, 0, 0); }
         }
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #1a1a1a; border-radius: 10px; }
       `}</style>
     </motion.div>
   );
