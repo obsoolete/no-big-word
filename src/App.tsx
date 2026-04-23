@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Timer, Trophy, Shield, Users, Info, ChevronRight, RotateCcw, AlertTriangle, Hammer, Trash2, Plus, Minus, User, Swords, Settings, X, LogOut, RefreshCw, PlayCircle } from 'lucide-react';
+import { Timer, Trophy, Shield, Users, Info, ChevronRight, ChevronLeft, RotateCcw, AlertTriangle, Hammer, Trash2, Plus, Minus, User, Swords, Settings, X, LogOut, RefreshCw, PlayCircle } from 'lucide-react';
 import { INITIAL_CARDS, CardItem } from './constants';
 import { countSyllables } from './gameService';
 
@@ -56,7 +56,15 @@ const playSound = (type: 'tick' | 'buzzer' | 'penalty' | 'correct') => {
 };
 
 type GameMode = 'teams' | 'solo';
-type GameState = 'welcome' | 'setup' | 'playing' | 'confirming' | 'round_end' | 'game_over';
+type GameState = 'welcome' | 'setup' | 'playing' | 'confirming' | 'round_end' | 'game_over' | 'reconfiguring' | 'scoreboard';
+
+interface PlayerStats {
+  score: number;
+  easy: number;
+  hard: number;
+  skip: number;
+  penalties: number;
+}
 
 interface Participant {
   id: number;
@@ -66,6 +74,7 @@ interface Participant {
   score: number;
   totalCorrect: number;
   totalPenalties: number;
+  playerStats: { [playerName: string]: PlayerStats };
 }
 
 const TEAM_COLORS = [
@@ -93,6 +102,11 @@ const TEAM_COLORS = [
 
 type FeedbackType = 'easy' | 'hard' | 'skip' | 'penalty';
 
+interface HistoryItem {
+  card: CardItem;
+  result: FeedbackType | 'none';
+}
+
 export default function App() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [gameState, setGameState] = useState<GameState>('welcome');
@@ -100,6 +114,7 @@ export default function App() {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [currentParticipantIndex, setCurrentParticipantIndex] = useState(0);
   const [roundsPerParticipant, setRoundsPerParticipant] = useState(2);
+  const [minTurnsPerPlayer, setMinTurnsPerPlayer] = useState(2);
   const [roundDuration, setRoundDuration] = useState(60);
   
   const [cards, setCards] = useState<CardItem[]>(INITIAL_CARDS);
@@ -111,6 +126,9 @@ export default function App() {
   const [activeFeedback, setActiveFeedback] = useState<FeedbackType | null>(null);
   const [roundsPlayed, setRoundsPlayed] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
+  const [roundHistory, setRoundHistory] = useState<HistoryItem[]>([]);
+  const [usedCardIds, setUsedCardIds] = useState<number[]>([]);
+  const [previousGameState, setPreviousGameState] = useState<GameState | null>(null);
 
   // Load state on mount
   useEffect(() => {
@@ -122,11 +140,13 @@ export default function App() {
         setGameMode(data.gameMode || 'teams');
         const loadedParticipants = (data.participants || []).map((p: any) => ({
           ...p,
-          totalPenalties: p.totalPenalties ?? 0
+          totalPenalties: p.totalPenalties ?? 0,
+          playerStats: p.playerStats || {}
         }));
         setParticipants(loadedParticipants);
         setCurrentParticipantIndex(data.currentParticipantIndex || 0);
         setRoundsPerParticipant(data.roundsPerParticipant || 2);
+        setMinTurnsPerPlayer(data.minTurnsPerPlayer || 2);
         setRoundDuration(data.roundDuration || 60);
         setCards(data.cards || INITIAL_CARDS);
         setCurrentCardIndex(data.currentCardIndex || 0);
@@ -140,6 +160,8 @@ export default function App() {
           skip: savedStats.skip ?? 0,
           penalties: savedStats.penalties ?? 0
         });
+        setRoundHistory(data.roundHistory || []);
+        setUsedCardIds(data.usedCardIds || []);
       } catch (e) {
         console.error("Failed to load saved game", e);
       }
@@ -156,29 +178,66 @@ export default function App() {
       participants,
       currentParticipantIndex,
       roundsPerParticipant,
+      minTurnsPerPlayer,
       roundDuration,
       cards,
       currentCardIndex,
       roundsPlayed,
       timeLeft,
       roundPoints,
-      roundStats
+      roundStats,
+      roundHistory,
+      usedCardIds
     };
     localStorage.setItem(SAVE_KEY, JSON.stringify(data));
-  }, [isInitialized, gameState, gameMode, participants, currentParticipantIndex, roundsPerParticipant, cards, currentCardIndex, roundsPlayed, timeLeft, roundPoints, roundStats]);
+  }, [isInitialized, gameState, gameMode, participants, currentParticipantIndex, roundsPerParticipant, minTurnsPerPlayer, cards, currentCardIndex, roundsPlayed, timeLeft, roundPoints, roundStats, roundHistory, usedCardIds]);
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   const maxTotalRounds = participants.length * roundsPerParticipant;
 
-  const handleSetupComplete = (mode: GameMode, parts: Participant[], totalRounds: number, duration: number) => {
+  const handleSetupComplete = (mode: GameMode, parts: Participant[], turnsPerTeam: number, duration: number, minTurns: number) => {
     setGameMode(mode);
     setParticipants(parts);
-    setRoundsPerParticipant(totalRounds);
+    setRoundsPerParticipant(turnsPerTeam);
+    setMinTurnsPerPlayer(minTurns);
     setRoundDuration(duration);
     setRoundsPlayed(0);
     setCurrentParticipantIndex(0);
     setGameState('round_end');
+  };
+
+  const handleReconfigureComplete = (mode: GameMode, parts: Participant[], turnsPerTeam: number, duration: number, minTurns: number) => {
+    // Preserve existing scores and stats for existing participants
+    const updatedParts = parts.map(newP => {
+      const existing = participants.find(p => p.id === newP.id);
+      if (existing) {
+        return {
+          ...newP,
+          score: existing.score,
+          totalCorrect: existing.totalCorrect,
+          totalPenalties: existing.totalPenalties,
+          playerStats: existing.playerStats || {}
+        };
+      }
+      return newP;
+    });
+
+    setGameMode(mode);
+    setParticipants(updatedParts);
+    setRoundsPerParticipant(turnsPerTeam);
+    setMinTurnsPerPlayer(minTurns);
+    setRoundDuration(duration);
+    
+    if (gameState === 'game_over') {
+      setRoundsPlayed(0);
+      setCurrentParticipantIndex(0);
+      setGameState('round_end');
+    } else {
+      setGameState('round_end'); 
+    }
+    
+    setShowSettings(false);
   };
 
   const startRound = () => {
@@ -186,11 +245,32 @@ export default function App() {
     setRoundStats({ easy: 0, hard: 0, skip: 0, penalties: 0 });
     setTimeLeft(roundDuration);
     setGameState('playing');
-    setCards(prev => [...prev].sort(() => Math.random() - 0.5));
+    
+    // Filter out used cards
+    let available = INITIAL_CARDS.filter(c => !usedCardIds.includes(c.id));
+    
+    // If not enough cards (e.g. less than 10% of total or enough for a round), reset the pool
+    // 30 seems like a safe minimum for a 1-minute round
+    if (available.length < 30) {
+      setUsedCardIds([]);
+      available = [...INITIAL_CARDS];
+    }
+    
+    setCards(available.sort(() => Math.random() - 0.5));
     setCurrentCardIndex(0);
+    setRoundHistory([]);
   };
 
   const handleNextCard = (points: number, isSkip = false) => {
+    const currentCard = cards[currentCardIndex];
+    let result: FeedbackType = 'easy';
+    if (points === 1) result = 'easy';
+    else if (points === 3) result = 'hard';
+    else if (isSkip) result = 'skip';
+    else result = 'penalty';
+
+    setRoundHistory(prev => [...prev, { card: currentCard, result }]);
+    
     setRoundPoints(prev => prev + points);
     if (points === 1) {
       setRoundStats(prev => ({ ...prev, easy: prev.easy + 1 }));
@@ -224,22 +304,40 @@ export default function App() {
 
   const endRound = useCallback(() => {
     if (timerRef.current) clearInterval(timerRef.current);
+    
+    // Add current card to history as 'none' if it's not already handled
+    setRoundHistory(prev => {
+      const currentCard = cards[currentCardIndex];
+      // Check if the card is already the last one in history to avoid doubles if button was pressed right at 0
+      if (prev.length > 0 && prev[prev.length - 1].card.id === currentCard.id) {
+        return prev;
+      }
+      return [...prev, { card: currentCard, result: 'none' }];
+    });
+
     setGameState('confirming');
-  }, []);
+  }, [cards, currentCardIndex]);
 
-  const confirmRoundResults = (finalRoundScore: number, lastMinutePoints: number) => {
-    const totalWithLastSecond = finalRoundScore + lastMinutePoints;
-    const roundCorrect = roundStats.easy + roundStats.hard;
-    const finalCorrect = roundCorrect + (lastMinutePoints > 0 ? 1 : 0);
-    const finalPenalties = roundStats.penalties + (lastMinutePoints < 0 ? 1 : 0);
-
+  const confirmRoundResults = (finalScore: number, finalEasy: number, finalHard: number, finalSkip: number, finalPenalties: number) => {
     setParticipants(prev => prev.map((p, idx) => {
       if (idx === currentParticipantIndex) {
+        const stats: PlayerStats = p.playerStats[talkerName] || { score: 0, easy: 0, hard: 0, skip: 0, penalties: 0 };
+        
         return {
           ...p,
-          score: p.score + totalWithLastSecond,
-          totalCorrect: p.totalCorrect + finalCorrect,
-          totalPenalties: p.totalPenalties + finalPenalties
+          score: p.score + finalScore,
+          totalCorrect: p.totalCorrect + finalEasy + finalHard,
+          totalPenalties: p.totalPenalties + finalPenalties,
+          playerStats: {
+            ...p.playerStats,
+            [talkerName]: {
+              score: stats.score + finalScore,
+              easy: stats.easy + finalEasy,
+              hard: stats.hard + finalHard,
+              skip: stats.skip + finalSkip,
+              penalties: stats.penalties + finalPenalties
+            }
+          }
         };
       }
       return p;
@@ -247,6 +345,16 @@ export default function App() {
 
     const nextRoundCount = roundsPlayed + 1;
     setRoundsPlayed(nextRoundCount);
+
+    // Track used cards
+    const usedThisRound = roundHistory.filter(h => h.result !== 'none').map(h => h.card.id);
+    if (usedThisRound.length > 0) {
+      setUsedCardIds(prev => {
+        const next = [...prev, ...usedThisRound];
+        // Ensure no duplicates
+        return Array.from(new Set(next));
+      });
+    }
 
     if (nextRoundCount >= maxTotalRounds) {
       setGameState('game_over');
@@ -286,6 +394,14 @@ export default function App() {
     localStorage.removeItem(SAVE_KEY);
   };
 
+  const rematch = () => {
+    setParticipants(prev => prev.map(p => ({ ...p, score: 0, totalCorrect: 0, totalPenalties: 0, playerStats: {} })));
+    setRoundsPlayed(0);
+    setCurrentParticipantIndex(0);
+    setGameState('round_end');
+    setShowSettings(false);
+  };
+
   const restartCurrentRound = () => {
     startRound();
     setShowSettings(false);
@@ -293,7 +409,7 @@ export default function App() {
 
   const restartFullGame = () => {
     // Reset scores and rounds but keep participants
-    setParticipants(prev => prev.map(p => ({ ...p, score: 0, totalCorrect: 0, totalPenalties: 0 })));
+    setParticipants(prev => prev.map(p => ({ ...p, score: 0, totalCorrect: 0, totalPenalties: 0, playerStats: {} })));
     setRoundsPlayed(0);
     setCurrentParticipantIndex(0);
     setGameState('round_end');
@@ -301,6 +417,26 @@ export default function App() {
   };
 
   const currentParticipant = participants[currentParticipantIndex];
+  const currentLap = Math.floor(roundsPlayed / (participants.length || 1));
+  const nextIdx = (currentParticipantIndex + 1) % (participants.length || 1);
+  const nextParticipant = participants[nextIdx];
+  
+  let talkerName = "";
+  let judgeName = "";
+  let judgeColor = nextParticipant?.color || "#E11D48";
+  
+  if (currentParticipant) {
+    if (gameMode === 'solo') {
+      talkerName = currentParticipant.name;
+      judgeName = nextParticipant?.name || 'Someone';
+    } else {
+      const talkerMemberIdx = currentLap % Math.max(1, currentParticipant.members.length);
+      talkerName = currentParticipant.members[talkerMemberIdx] || currentParticipant.name;
+      
+      const judgeMemberIdx = currentLap % Math.max(1, nextParticipant?.members.length || 1);
+      judgeName = nextParticipant?.members[judgeMemberIdx] || nextParticipant?.name || 'Someone';
+    }
+  }
 
   if (!isInitialized) return null;
 
@@ -313,7 +449,7 @@ export default function App() {
       <div className="fixed top-0 left-0 right-0 p-4 flex justify-end z-50 pointer-events-none">
         <button 
           onClick={() => setShowSettings(true)}
-          className="pointer-events-auto w-12 h-12 bg-white border-4 border-[#1a1a1a] rounded-2xl flex items-center justify-center shadow-[4px_4px_0_#1a1a1a] active:translate-y-1 active:shadow-none transition-all hover:bg-gray-50"
+          className="pointer-events-auto w-10 h-10 flex items-center justify-center transition-all opacity-20 hover:opacity-100 active:scale-95"
         >
           <Settings className="w-6 h-6" />
         </button>
@@ -328,63 +464,90 @@ export default function App() {
             className="fixed inset-0 z-[60] bg-[#1a1a1a]/80 backdrop-blur-sm flex items-center justify-center p-6"
             onClick={() => setShowSettings(false)}
           >
-            <motion.div 
-              initial={{ scale: 0.9, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.9, y: 20 }}
-              className="w-full max-w-sm bg-white border-8 border-[#1a1a1a] rounded-[3rem] p-8 shadow-[12px_12px_0_#1a1a1a]"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex justify-between items-center mb-8">
-                <h3 className="text-3xl font-black uppercase tracking-tighter">Settings</h3>
-                <button onClick={() => setShowSettings(false)} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-gray-100 transition-colors">
-                  <X className="w-8 h-8" />
-                </button>
-              </div>
+              <motion.div 
+                initial={{ scale: 0.9, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.9, y: 20 }}
+                className="w-full max-w-sm bg-white border-8 border-[#1a1a1a] rounded-[3rem] p-8 shadow-[12px_12px_0_#1a1a1a] flex flex-col"
+                onClick={(e) => e.stopPropagation()}
+              >
+                    <div className="flex justify-between items-center mb-8">
+                      <h3 className="text-3xl font-black uppercase tracking-tighter">Settings</h3>
+                      <button onClick={() => setShowSettings(false)} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-gray-100 transition-colors">
+                        <X className="w-8 h-8" />
+                      </button>
+                    </div>
 
-              <div className="space-y-4">
-                {gameState === 'playing' && (
-                  <button 
-                    onClick={restartCurrentRound}
-                    className="w-full flex items-center gap-4 bg-blue-50 text-blue-600 p-4 rounded-3xl font-black uppercase tracking-tight text-lg border-4 border-blue-200 hover:bg-blue-100 transition-colors"
-                  >
-                    <RefreshCw className="w-6 h-6" />
-                    Restart Round
-                  </button>
-                )}
+                    <div className="space-y-4">
+                      {gameState !== 'welcome' && gameState !== 'setup' && (
+                        <button 
+                          onClick={() => {
+                            setPreviousGameState(gameState);
+                            setGameState('scoreboard');
+                            setShowSettings(false);
+                          }}
+                          className="w-full flex items-center gap-4 bg-emerald-50 text-emerald-600 p-4 rounded-3xl font-black uppercase tracking-tight text-lg border-4 border-emerald-200 hover:bg-emerald-100 transition-colors"
+                        >
+                          <Trophy className="w-6 h-6" />
+                          Scoreboard
+                        </button>
+                      )}
 
-                {gameState !== 'welcome' && gameState !== 'setup' && (
-                  <button 
-                    onClick={restartFullGame}
-                    className="w-full flex items-center gap-4 bg-orange-50 text-orange-600 p-4 rounded-3xl font-black uppercase tracking-tight text-lg border-4 border-orange-200 hover:bg-orange-100 transition-colors"
-                  >
-                    <PlayCircle className="w-6 h-6" />
-                    Restart Game
-                  </button>
-                )}
+                      {gameState === 'playing' && (
+                        <button 
+                          onClick={restartCurrentRound}
+                          className="w-full flex items-center gap-4 bg-blue-50 text-blue-600 p-4 rounded-3xl font-black uppercase tracking-tight text-lg border-4 border-blue-200 hover:bg-blue-100 transition-colors"
+                        >
+                          <RefreshCw className="w-6 h-6" />
+                          Restart Round
+                        </button>
+                      )}
 
-                {gameState !== 'welcome' && (
-                  <button 
-                    onClick={resetGame}
-                    className="w-full flex items-center gap-4 bg-red-50 text-red-600 p-4 rounded-3xl font-black uppercase tracking-tight text-lg border-4 border-red-200 hover:bg-red-100 transition-colors"
-                  >
-                    <LogOut className="w-6 h-6" />
-                    Quit to Title
-                  </button>
-                )}
+                      {gameState === 'round_end' && (
+                        <button 
+                          onClick={() => {
+                            setGameState('reconfiguring');
+                            setShowSettings(false);
+                          }}
+                          className="w-full flex items-center gap-4 bg-indigo-50 text-indigo-600 p-4 rounded-3xl font-black uppercase tracking-tight text-lg border-4 border-indigo-200 hover:bg-indigo-100 transition-colors"
+                        >
+                          <Users className="w-6 h-6" />
+                          Reconfigure Teams
+                        </button>
+                      )}
 
-                <button 
-                  onClick={() => setShowSettings(false)}
-                  className="w-full bg-[#1a1a1a] text-white p-4 rounded-3xl font-black uppercase tracking-tight text-lg shadow-[0_4px_0_#1a1a1a] active:translate-y-1 active:shadow-none transition-all mt-4"
-                >
-                  Close
-                </button>
+                      {gameState !== 'welcome' && gameState !== 'setup' && (
+                        <button 
+                          onClick={restartFullGame}
+                          className="w-full flex items-center gap-4 bg-orange-50 text-orange-600 p-4 rounded-3xl font-black uppercase tracking-tight text-lg border-4 border-orange-200 hover:bg-orange-100 transition-colors"
+                        >
+                          <PlayCircle className="w-6 h-6" />
+                          Restart Game
+                        </button>
+                      )}
 
-                <div className="mt-8 text-center text-[10px] font-black uppercase tracking-widest opacity-20">
-                  Version 1.0.2
-                </div>
-              </div>
-            </motion.div>
+                      {gameState !== 'welcome' && (
+                        <button 
+                          onClick={resetGame}
+                          className="w-full flex items-center gap-4 bg-red-50 text-red-600 p-4 rounded-3xl font-black uppercase tracking-tight text-lg border-4 border-red-200 hover:bg-red-100 transition-colors"
+                        >
+                          <LogOut className="w-6 h-6" />
+                          Quit to Title
+                        </button>
+                      )}
+
+                      <button 
+                        onClick={() => setShowSettings(false)}
+                        className="w-full bg-[#1a1a1a] text-white p-4 rounded-3xl font-black uppercase tracking-tight text-lg shadow-[0_4px_0_#1a1a1a] active:translate-y-1 active:shadow-none transition-all mt-4"
+                      >
+                        Close
+                      </button>
+
+                      <div className="mt-8 text-center text-[10px] font-black uppercase tracking-widest opacity-20">
+                        Version 1.0.2
+                      </div>
+                    </div>
+              </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -404,46 +567,24 @@ export default function App() {
 
           {gameState === 'confirming' && (
             <RoundConfirmationView 
-              roundPoints={roundPoints}
-              roundStats={roundStats}
               participants={participants}
               currentIdx={currentParticipantIndex}
+              initialHistory={roundHistory}
               onConfirm={confirmRoundResults}
             />
           )}
 
-          {gameState === 'round_end' && (() => {
-            const currentLap = Math.floor(roundsPlayed / participants.length);
-            const nextIdx = (currentParticipantIndex + 1) % participants.length;
-            const nextParticipant = participants[nextIdx];
-            
-            let talkerName = "";
-            let judgeName = "";
-            let judgeColor = nextParticipant?.color || "#E11D48";
-            
-            if (gameMode === 'solo') {
-              talkerName = currentParticipant.name;
-              judgeName = nextParticipant?.name || 'Someone';
-            } else {
-              const talkerMemberIdx = currentLap % Math.max(1, currentParticipant.members.length);
-              talkerName = currentParticipant.members[talkerMemberIdx] || currentParticipant.name;
-              
-              const judgeMemberIdx = currentLap % Math.max(1, nextParticipant?.members.length || 1);
-              judgeName = nextParticipant?.members[judgeMemberIdx] || nextParticipant?.name || 'Someone';
-            }
-
-            return (
-              <RoundPromptView 
-                participant={currentParticipant} 
-                onStart={startRound} 
-                roundNumber={currentLap + 1}
-                isSolo={gameMode === 'solo'}
-                talkerName={talkerName}
-                judgeName={judgeName}
-                judgeColor={judgeColor}
-              />
-            );
-          })()}
+          {gameState === 'round_end' && (
+            <RoundPromptView 
+              participant={currentParticipant} 
+              onStart={startRound} 
+              roundNumber={currentLap + 1}
+              isSolo={gameMode === 'solo'}
+              talkerName={talkerName}
+              judgeName={judgeName}
+              judgeColor={judgeColor}
+            />
+          )}
 
           {gameState === 'playing' && (
             <PlayView 
@@ -454,11 +595,42 @@ export default function App() {
               participantName={currentParticipant?.name}
               participantColor={currentParticipant?.color}
               isPenaltyActive={isPenaltyActive}
+              talkerName={talkerName}
+            />
+          )}
+
+
+          {gameState === 'reconfiguring' && (
+            <SetupView 
+              initialData={{
+                mode: gameMode,
+                participants,
+                minTurnsPerPlayer,
+                duration: roundDuration
+              }}
+              onComplete={handleReconfigureComplete}
+              onBack={() => setGameState('round_end')}
+              isEditing
+            />
+          )}
+
+          {gameState === 'scoreboard' && (
+            <ScoreboardView 
+              participants={participants} 
+              onBack={() => {
+                if (previousGameState) setGameState(previousGameState);
+                setPreviousGameState(null);
+              }}
             />
           )}
 
           {gameState === 'game_over' && (
-            <GameOverView participants={participants} onReset={resetGame} />
+            <GameOverView 
+              participants={participants} 
+              onReset={resetGame}
+              onRematch={rematch}
+              onReconfigure={() => setGameState('reconfiguring')}
+            />
           )}
         </AnimatePresence>
       </main>
@@ -487,103 +659,131 @@ export default function App() {
   );
 }
 
-function RoundConfirmationView({ roundPoints, roundStats, participants, currentIdx, onConfirm }: { 
-  roundPoints: number, roundStats: { easy: number, hard: number, skip: number, penalties: number }, participants: Participant[], currentIdx: number, onConfirm: (p: number, extra: number) => void 
+function RoundConfirmationView({ participants, currentIdx, initialHistory, onConfirm }: { 
+  participants: Participant[], 
+  currentIdx: number, 
+  initialHistory: HistoryItem[], 
+  onConfirm: (score: number, easy: number, hard: number, skip: number, penalties: number) => void 
 }) {
-  const [lastSecondAward, setLastSecondAward] = useState<0 | 1 | 3 | -1>(0);
+  const [history, setHistory] = useState<HistoryItem[]>(initialHistory);
   const currentP = participants[currentIdx];
 
-  const displayPoints = roundPoints + lastSecondAward;
-  const displayEasy = roundStats.easy + (lastSecondAward === 1 ? 1 : 0);
-  const displayHard = roundStats.hard + (lastSecondAward === 3 ? 1 : 0);
-  const displayPenalties = roundStats.penalties + (lastSecondAward === -1 ? 1 : 0);
+  const stats = history.reduce((acc, item) => {
+    if (item.result === 'easy') { acc.score += 1; acc.easy += 1; }
+    else if (item.result === 'hard') { acc.score += 3; acc.hard += 1; }
+    else if (item.result === 'skip') { acc.score -= 1; acc.skip += 1; }
+    else if (item.result === 'penalty') { acc.score -= 1; acc.penalties += 1; }
+    return acc;
+  }, { score: 0, easy: 0, hard: 0, skip: 0, penalties: 0 });
+
+  const updateResult = (idx: number, result: FeedbackType | 'none') => {
+    const newHistory = [...history];
+    newHistory[idx] = { ...newHistory[idx], result };
+    setHistory(newHistory);
+  };
 
   return (
     <motion.div 
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
-      className="flex-1 flex flex-col gap-6 py-4"
+      className="flex-1 flex flex-col gap-6 py-4 h-full"
     >
       <div className="flex flex-col items-center text-center space-y-2 w-full">
-        <div className="inline-block px-4 py-1 rounded-full text-[10px] font-black text-white uppercase mb-2" style={{ backgroundColor: currentP?.color || '#1a1a1a' }}>
+        <div className="inline-block px-4 py-1 rounded-full text-[10px] font-black text-white uppercase mb-1" style={{ backgroundColor: currentP?.color || '#1a1a1a' }}>
           {currentP?.name}'s Result
         </div>
-        <h2 className="text-4xl sm:text-5xl font-black uppercase tracking-tighter text-[#1a1a1a]">
-          Turn Over!
+        <h2 className="text-4xl font-black uppercase tracking-tighter text-[#1a1a1a]">
+          Review Turn
         </h2>
       </div>
 
-      <div className="bg-white border-4 border-[#1a1a1a] rounded-[2rem] p-8 text-center shadow-[8px_8px_0_#1a1a1a] relative overflow-hidden transition-colors">
-        <div className="text-6xl font-black text-[#4F46E5] relative z-10 transition-transform">
-          {displayPoints}
-        </div>
-        <div className="text-xs font-black uppercase opacity-60 relative z-10">Points Won This Turn</div>
-        {lastSecondAward !== 0 && (
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.5 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className={`absolute top-4 right-8 text-2xl font-black ${lastSecondAward > 0 ? 'text-green-500' : 'text-red-500'}`}
-          >
-            {lastSecondAward > 0 ? '+' : ''}{lastSecondAward}
-          </motion.div>
-        )}
+      <div className="bg-white border-4 border-[#1a1a1a] rounded-[2rem] p-6 text-center shadow-[6px_6px_0_#1a1a1a]">
+        <div className="text-5xl font-black text-[#4F46E5]">{stats.score}</div>
+        <div className="text-[10px] font-black uppercase opacity-60">Total Points Won This Turn</div>
       </div>
 
-      <div className="bg-white border-4 border-[#1a1a1a] rounded-[2rem] p-4 shadow-[8px_8px_0_#1a1a1a]">
-        <h3 className="text-[10px] font-black uppercase mb-3 text-center opacity-40 italic">Round Statistics</h3>
+      <div className="bg-white border-4 border-[#1a1a1a] rounded-[2rem] p-4 shadow-[6px_6px_0_#1a1a1a]">
+        <h3 className="text-[10px] font-black uppercase mb-3 text-center opacity-40 italic">Turn Statistics</h3>
         <div className="grid grid-cols-4 gap-2">
           <div className="text-center">
-            <div className={`text-xl font-black transition-colors ${lastSecondAward === 1 ? 'text-green-600 scale-110' : 'text-[#22c55e]'}`}>{displayEasy || 0}</div>
+            <div className="text-xl font-black text-[#22c55e]">{stats.easy}</div>
             <div className="text-[8px] font-black uppercase opacity-60">Easy</div>
           </div>
           <div className="text-center">
-            <div className={`text-xl font-black transition-colors ${lastSecondAward === 3 ? 'text-blue-600 scale-110' : 'text-[#3b82f6]'}`}>{displayHard || 0}</div>
+            <div className="text-xl font-black text-[#3b82f6]">{stats.hard}</div>
             <div className="text-[8px] font-black uppercase opacity-60">Hard</div>
           </div>
           <div className="text-center">
-            <div className="text-xl font-black text-gray-400">{roundStats.skip || 0}</div>
+            <div className="text-xl font-black text-gray-400">{stats.skip}</div>
             <div className="text-[8px] font-black uppercase opacity-60">Skip</div>
           </div>
           <div className="text-center">
-            <div className={`text-xl font-black transition-colors ${lastSecondAward === -1 ? 'text-red-600 scale-110' : 'text-red-500'}`}>{displayPenalties || 0}</div>
+            <div className="text-xl font-black text-[#ef4444]">{stats.penalties}</div>
             <div className="text-[8px] font-black uppercase opacity-60">Penalty</div>
           </div>
         </div>
       </div>
 
-      <div className="bg-white border-4 border-[#1a1a1a] rounded-[2rem] p-6 shadow-[8px_8px_0_#1a1a1a]">
-        <h3 className="text-xs font-black uppercase mb-4 text-center">Last Second Guess?</h3>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          <button onClick={() => setLastSecondAward(0)} className={`py-3 rounded-xl font-black text-[10px] uppercase border-2 border-[#1a1a1a] transition-all ${lastSecondAward === 0 ? 'bg-[#1a1a1a] text-white shadow-inner translate-y-0.5' : 'bg-transparent text-[#1a1a1a]'}`}>No</button>
-          <button onClick={() => setLastSecondAward(1)} className={`py-3 rounded-xl font-black text-[10px] uppercase border-2 border-[#1a1a1a] transition-all ${lastSecondAward === 1 ? 'bg-[#22c55e] text-white shadow-inner translate-y-0.5' : 'bg-transparent text-[#1a1a1a] border-[#22c55e]/30'}`}>Easy (+1)</button>
-          <button onClick={() => setLastSecondAward(3)} className={`py-3 rounded-xl font-black text-[10px] uppercase border-2 border-[#1a1a1a] transition-all ${lastSecondAward === 3 ? 'bg-[#3b82f6] text-white shadow-inner translate-y-0.5' : 'bg-transparent text-[#1a1a1a] border-[#3b82f6]/30'}`}>Hard (+3)</button>
-          <button onClick={() => setLastSecondAward(-1)} className={`py-3 rounded-xl font-black text-[10px] uppercase border-2 border-[#1a1a1a] transition-all ${lastSecondAward === -1 ? 'bg-[#ef4444] text-white shadow-inner translate-y-0.5' : 'bg-transparent text-[#1a1a1a] border-[#ef4444]/30'}`}>Penalty (-1)</button>
-        </div>
+      <div className="flex-1 overflow-y-auto no-scrollbar space-y-4 pr-1 min-h-0">
+        <h3 className="text-[10px] font-black uppercase opacity-40 ml-2">Review All Cards</h3>
+        {history.map((item, idx) => (
+          <div key={idx} className="bg-white border-4 border-[#1a1a1a] rounded-[2rem] p-5 shadow-[6px_6px_0_#1a1a1a] space-y-4">
+            <div className="space-y-3">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[7px] font-black uppercase tracking-widest text-[#22c55e]">Easy Word</span>
+                <div className="text-xl font-black tracking-tighter leading-none text-[#1a1a1a]">{item.card.word}</div>
+              </div>
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[7px] font-black uppercase tracking-widest text-[#3b82f6]">Hard Phrase</span>
+                <div className="text-sm font-bold text-slate-600 italic tracking-tight leading-none">{item.card.phrase}</div>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-5 gap-1.5">
+              {[
+                { id: 'none', label: 'None', active: 'bg-gray-200 text-gray-600', inactive: 'bg-gray-50 text-gray-400' },
+                { id: 'easy', label: 'Easy', active: 'bg-[#22c55e] text-white', inactive: 'bg-[#22c55e]/10 text-[#22c55e]' },
+                { id: 'hard', label: 'Hard', active: 'bg-[#3b82f6] text-white', inactive: 'bg-[#3b82f6]/10 text-[#3b82f6]' },
+                { id: 'skip', label: 'Skip', active: 'bg-gray-500 text-white', inactive: 'bg-gray-500/10 text-gray-500' },
+                { id: 'penalty', label: 'Penalty', active: 'bg-[#ef4444] text-white', inactive: 'bg-[#ef4444]/10 text-[#ef4444]' }
+              ].map(opt => (
+                <button
+                  key={opt.id}
+                  onClick={() => updateResult(idx, opt.id as any)}
+                  className={`py-2 rounded-lg font-black text-[8px] uppercase transition-all border-2 ${
+                    item.result === opt.id 
+                      ? `${opt.active} border-[#1a1a1a] translate-y-0.5 shadow-none` 
+                      : `${opt.inactive} border-transparent opacity-60 hover:opacity-100 hover:border-[#1a1a1a]/10`
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+        <div className="pb-8" />
       </div>
 
-      <div className="flex-1 bg-[#1a1a1a] rounded-[2.5rem] p-6 text-white border-4 border-white shadow-[8px_8px_0_#1a1a1a] overflow-y-auto max-h-[30vh] pr-4 no-scrollbar">
-        <h4 className="text-center text-[10px] font-black uppercase tracking-widest mb-6 opacity-40">Overall Leaderboard</h4>
-        <div className="space-y-4">
+      <div className="bg-white rounded-[2rem] p-6 text-[#1a1a1a] border-4 border-[#1a1a1a] shadow-[6px_6px_0_#1a1a1a] overflow-y-auto max-h-[25vh] no-scrollbar shrink-0">
+        <h4 className="text-center text-[10px] font-black uppercase tracking-widest mb-4 opacity-40">Leaderboard Preview</h4>
+        <div className="space-y-3">
           {[...participants].sort((a, b) => {
-            const scoreA = a.id === currentP?.id ? a.score + displayPoints : a.score;
-            const scoreB = b.id === currentP?.id ? b.score + displayPoints : b.score;
+            const scoreA = a.id === currentP?.id ? a.score + stats.score : a.score;
+            const scoreB = b.id === currentP?.id ? b.score + stats.score : b.score;
             return scoreB - scoreA;
           }).map((p, i) => {
             const isCurrent = p.id === currentP?.id;
             return (
               <div key={p.id} className={`flex justify-between items-center transition-all ${isCurrent ? 'scale-105' : 'opacity-80'}`}>
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full border-2 border-white flex items-center justify-center font-black text-[8px]" style={{ backgroundColor: p.color }}>{i+1}</div>
-                  <span className={`font-black uppercase tracking-tight text-xs ${isCurrent ? 'text-[#FFD700]' : 'text-white'}`}>{p.name}</span>
+                  <div className="w-6 h-6 rounded-full border-2 border-[#1a1a1a] flex items-center justify-center font-black text-[8px]" style={{ backgroundColor: p.color }}>{i+1}</div>
+                  <span className={`font-black uppercase tracking-tight text-[10px] ${isCurrent ? 'text-[#4F46E5]' : 'text-[#1a1a1a]'}`}>{p.name}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  {isCurrent && (
-                    <span className="text-[10px] font-black opacity-60 text-[#FFD700]">
-                      {p.score} + {displayPoints} =
-                    </span>
-                  )}
-                  <span className={`text-xl font-black ${isCurrent ? 'text-[#FFD700]' : 'text-white'}`}>
-                    {isCurrent ? p.score + displayPoints : p.score}
+                  {isCurrent && <span className="text-[9px] font-black opacity-40 text-[#4F46E5]">{p.score} + {stats.score} =</span>}
+                  <span className={`text-sm font-black ${isCurrent ? 'text-[#4F46E5]' : 'text-[#1a1a1a]'}`}>
+                    {isCurrent ? p.score + stats.score : p.score}
                   </span>
                 </div>
               </div>
@@ -593,10 +793,10 @@ function RoundConfirmationView({ roundPoints, roundStats, participants, currentI
       </div>
 
       <button 
-        onClick={() => onConfirm(roundPoints, lastSecondAward)}
-        className="bg-[#1a1a1a] text-white py-6 rounded-full font-black text-2xl uppercase tracking-tighter shadow-[0_8px_0_0_#1a1a1a] active:translate-y-2 active:shadow-none transition-all flex items-center justify-center gap-2 border-2 border-white"
+        onClick={() => onConfirm(stats.score, stats.easy, stats.hard, stats.skip, stats.penalties)}
+        className="bg-[#1a1a1a] text-white py-6 rounded-full font-black text-2xl uppercase tracking-tighter shadow-[0_8px_0_0_#1a1a1a] active:translate-y-2 active:shadow-none transition-all flex items-center justify-center gap-2 border-2 border-white mb-2"
       >
-        Finish Turn <ChevronRight className="w-6 h-6" />
+        Confirm Score <ChevronRight className="w-6 h-6" />
       </button>
     </motion.div>
   );
@@ -725,8 +925,8 @@ function RoundPromptView({ participant, onStart, roundNumber, isSolo, talkerName
   );
 }
 
-function PlayView({ card, timeLeft, roundPoints, onNext, participantName, participantColor, isPenaltyActive }: { 
-  card: CardItem, timeLeft: number, roundPoints: number, onNext: (p: number, skip?: boolean) => void, participantName: string, participantColor: string, isPenaltyActive: boolean 
+function PlayView({ card, timeLeft, roundPoints, onNext, participantName, participantColor, isPenaltyActive, talkerName }: { 
+  card: CardItem, timeLeft: number, roundPoints: number, onNext: (p: number, skip?: boolean) => void, participantName: string, participantColor: string, isPenaltyActive: boolean, talkerName: string 
 }) {
   return (
     <motion.div 
@@ -742,7 +942,7 @@ function PlayView({ card, timeLeft, roundPoints, onNext, participantName, partic
         </div>
         <div className="flex items-center gap-3">
           <div className="flex flex-col items-end">
-            <span className="text-[10px] uppercase font-black opacity-40">{participantName} Score</span>
+            <span className="text-[10px] uppercase font-black opacity-40">{talkerName} ({participantName}) Score</span>
             <span className="font-black text-2xl leading-none">{roundPoints}</span>
           </div>
           <div className="w-8 h-8 rounded-lg border-2 border-[#1a1a1a]" style={{ backgroundColor: participantColor }} />
@@ -762,7 +962,7 @@ function PlayView({ card, timeLeft, roundPoints, onNext, participantName, partic
         <div className="flex-1 flex flex-col items-center justify-center p-8 gap-10">
           <div className="text-center">
             <div className="inline-block bg-[#22c55e] text-white px-3 py-0.5 rounded text-[10px] font-black uppercase mb-3">Easy (1 Point)</div>
-            <div className="text-5xl font-black text-[#1a1a1a] tracking-tighter uppercase leading-none break-words">
+            <div className="text-5xl font-black text-[#1a1a1a] tracking-tighter leading-none break-words">
               {card.word}
             </div>
           </div>
@@ -806,7 +1006,9 @@ function PlayView({ card, timeLeft, roundPoints, onNext, participantName, partic
   );
 }
 
-function GameOverView({ participants, onReset }: { participants: Participant[], onReset: () => void }) {
+function GameOverView({ participants, onReset, onRematch, onReconfigure }: { 
+  participants: Participant[], onReset: () => void, onRematch: () => void, onReconfigure: () => void 
+}) {
   const sorted = [...participants].sort((a, b) => b.score - a.score);
   const winner = sorted[0].score > (sorted[1]?.score ?? -1) ? sorted[0] : null;
 
@@ -814,76 +1016,272 @@ function GameOverView({ participants, onReset }: { participants: Participant[], 
     <motion.div 
       initial={{ opacity: 0, y: 50 }}
       animate={{ opacity: 1, y: 0 }}
-      className="flex-1 flex flex-col justify-center items-center text-center gap-8 py-4"
+      className="flex-1 flex flex-col justify-center items-center text-center gap-6 py-4"
     >
       <div className="relative">
-        <Trophy className="w-32 h-32 text-[#FFD700] drop-shadow-[0_10px_0_#1a1a1a] relative z-10" />
+        <Trophy className="w-24 h-24 text-[#FFD700] drop-shadow-[0_8px_0_#1a1a1a] relative z-10" />
         <div className="absolute inset-0 bg-[#4F46E5] rounded-full blur-3xl opacity-20 animate-pulse" />
       </div>
       
       <div>
-        <h2 className="text-6xl sm:text-7xl font-black text-[#1a1a1a] tracking-tighter uppercase leading-none drop-shadow-[0_6px_0_#FF4500]">
+        <h2 className="text-5xl font-black text-[#1a1a1a] tracking-tighter uppercase leading-none drop-shadow-[0_4px_0_#FF4500]">
           {winner ? 'Winner!' : 'It\'s a Tie!'}
         </h2>
         {winner && (
-          <div className="mt-4 rotate-2">
-            <span className="text-2xl font-black text-white px-8 py-3 rounded-2xl inline-block shadow-[8px_8px_0_#1a1a1a] border-2 border-white uppercase tracking-tighter" style={{ backgroundColor: winner.color }}>
+          <div className="mt-3 rotate-1">
+            <span className="text-xl font-black text-white px-6 py-2 rounded-2xl inline-block shadow-[6px_6px_0_#1a1a1a] border-2 border-white uppercase tracking-tighter" style={{ backgroundColor: winner.color }}>
               {winner.name} Wins!
             </span>
           </div>
         )}
       </div>
 
-      <div className="w-full space-y-4 max-h-[40vh] overflow-y-auto pr-4 pb-6 no-scrollbar">
+      <div className="w-full space-y-3 max-h-[50vh] overflow-y-auto pr-4 pb-4 no-scrollbar">
         {sorted.map((p, i) => (
-          <div key={p.id} className="border-[6px] border-[#1a1a1a] p-6 rounded-[2.5rem] flex flex-col shadow-[8px_8px_0_#1a1a1a]" style={{ backgroundColor: p.color }}>
-            <div className="flex justify-between items-center w-full mb-2">
+          <div key={p.id} className="border-[4px] border-[#1a1a1a] p-4 rounded-[2rem] flex flex-col shadow-[6px_6px_0_#1a1a1a] bg-white relative overflow-hidden">
+            {/* Color Ribbon */}
+            <div className="absolute top-0 left-0 w-3 h-full" style={{ backgroundColor: p.color }} />
+            
+            <div className="flex justify-between items-center w-full mb-1 pl-4">
               <div className="text-left font-black leading-none">
-                <div className="text-[10px] uppercase text-white/70">Place #{i+1}</div>
-                <div className="text-3xl text-white tracking-tighter">{p.name}</div>
+                <div className="text-[8px] uppercase text-[#1a1a1a]/40">Place #{i+1}</div>
+                <div className="text-2xl text-[#1a1a1a] tracking-tighter leading-none">{p.name}</div>
+                {p.members.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {p.members.map((m, mi) => (
+                      <span key={mi} className="text-[7px] bg-[#1a1a1a]/5 px-2 py-0.5 rounded-full font-black uppercase text-[#1a1a1a]/40">
+                        {m}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
-              <div className="text-5xl font-black text-white">{p.score}</div>
+              <div className="text-3xl font-black text-[#1a1a1a]">{p.score}</div>
             </div>
-            <div className="flex justify-start gap-4 text-[10px] font-black uppercase text-white/70">
+            <div className="flex justify-start gap-4 text-[9px] font-black uppercase text-[#1a1a1a]/60 border-b border-[#1a1a1a]/10 pb-3 mb-3 pl-4">
               <span>{p.totalCorrect} Correct</span>
               <span>{p.totalPenalties} Penalties</span>
+            </div>
+
+            {/* PLAYER BREAKDOWN */}
+            <div className="space-y-3 pl-4">
+              {Object.entries(p.playerStats).length > 0 ? (
+                Object.entries(p.playerStats).map(([playerName, stats]) => (
+                  <div key={playerName} className="flex flex-col gap-1 text-left bg-[#1a1a1a]/5 rounded-xl p-2 px-3">
+                    <div className="flex justify-between items-end">
+                      <span className="text-xs font-black uppercase text-[#1a1a1a] tracking-tight leading-none">{playerName}</span>
+                      <span className="text-sm font-black text-[#1a1a1a] leading-none">{stats.score} <span className="text-[8px] opacity-40 uppercase">Pts</span></span>
+                    </div>
+                    <div className="grid grid-cols-4 gap-1">
+                      <div className="flex flex-col">
+                        <span className="text-[10px] font-black text-[#22c55e] leading-none">{stats.easy}</span>
+                        <span className="text-[7px] font-bold text-[#1a1a1a]/40 uppercase">Easy</span>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-[10px] font-black text-[#3b82f6] leading-none">{stats.hard}</span>
+                        <span className="text-[7px] font-bold text-[#1a1a1a]/40 uppercase">Hard</span>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-[10px] font-black text-orange-400 leading-none">{stats.skip}</span>
+                        <span className="text-[7px] font-bold text-[#1a1a1a]/40 uppercase">Skip</span>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-[10px] font-black text-red-500 leading-none">{stats.penalties}</span>
+                        <span className="text-[7px] font-bold text-[#1a1a1a]/40 uppercase">Penalty</span>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-[10px] font-black uppercase text-[#1a1a1a]/20 italic py-2">No individual stats recorded</div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="w-full grid grid-cols-2 gap-3">
+        <button 
+          onClick={onRematch}
+          className="bg-[#22c55e] text-white py-4 rounded-3xl font-black uppercase tracking-tight text-lg shadow-[0_6px_0_#166534] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2 border-2 border-white"
+        >
+          <RotateCcw className="w-5 h-5" /> Rematch
+        </button>
+        <button 
+          onClick={onReconfigure}
+          className="bg-[#6366f1] text-white py-4 rounded-3xl font-black uppercase tracking-tight text-lg shadow-[0_6px_0_#3730a3] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2 border-2 border-white"
+        >
+          <Settings className="w-5 h-5" /> Edit
+        </button>
+      </div>
+
+      <button 
+        onClick={onReset}
+        className="w-full bg-[#1a1a1a] text-white py-4 rounded-3xl font-black uppercase tracking-tight text-lg shadow-[0_6px_0_#000000] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2 border-2 border-white"
+      >
+        <LogOut className="w-5 h-5" /> Quit to Title
+      </button>
+    </motion.div>
+  );
+}
+function ScoreboardView({ participants, onBack }: { participants: Participant[], onBack: () => void }) {
+  const sorted = [...participants].sort((a, b) => b.score - a.score);
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 1.05 }}
+      className="flex-1 flex flex-col gap-6 py-4"
+    >
+      <div className="flex flex-col items-center text-center space-y-1 w-full mt-4">
+        <h2 className="text-4xl font-black text-[#1a1a1a] tracking-tight uppercase leading-none drop-shadow-[0_4px_0_#FF4500]">
+          Scoreboard
+        </h2>
+        <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-[#1a1a1a] font-bold opacity-40">Current Standings & Teams</p>
+      </div>
+
+      <div className="w-full space-y-4 max-h-[60vh] overflow-y-auto pr-2 pb-4 no-scrollbar">
+        {sorted.map((p, i) => (
+          <div key={p.id} className="border-[4px] border-[#1a1a1a] p-5 rounded-[2.5rem] flex flex-col shadow-[8px_8px_0_#1a1a1a] bg-white relative overflow-hidden">
+            {/* Color Ribbon */}
+            <div className="absolute top-0 left-0 w-3 h-full" style={{ backgroundColor: p.color }} />
+            
+            <div className="flex justify-between items-start w-full mb-3 pl-3">
+              <div className="text-left font-black">
+                <div className="text-[9px] uppercase text-[#1a1a1a]/40">Rank #{i+1}</div>
+                <div className="text-2xl text-[#1a1a1a] tracking-tight leading-none mb-2">{p.name}</div>
+                {p.members.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {p.members.map((m, mi) => (
+                      <span key={mi} className="text-[8px] bg-gray-100 px-2 py-1 rounded-lg font-black uppercase text-gray-500 border border-gray-200">
+                        {m}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="text-4xl font-black text-[#1a1a1a] drop-shadow-[0_2px_0_white]">{p.score}</div>
+            </div>
+
+            <div className="flex justify-start gap-4 text-[9px] font-black uppercase text-[#1a1a1a]/60 border-t border-b border-gray-100 py-3 mb-4 pl-3">
+              <span className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-green-500" /> {p.totalCorrect} Correct</span>
+              <span className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-red-500" /> {p.totalPenalties} Penalties</span>
+            </div>
+
+            {/* PLAYER BREAKDOWN */}
+            <div className="space-y-2 pl-3">
+              {Object.entries(p.playerStats).length > 0 ? (
+                Object.entries(p.playerStats).map(([playerName, stats]) => (
+                  <div key={playerName} className="flex flex-col gap-1 text-left bg-gray-50 rounded-xl p-3 border border-gray-100">
+                    <div className="flex justify-between items-end mb-1">
+                      <span className="text-[10px] font-black uppercase text-[#1a1a1a] tracking-tight">{playerName}</span>
+                      <span className="text-[10px] font-black text-[#1a1a1a] opacity-40">{stats.score} PTS</span>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2 text-center">
+                      <div>
+                        <div className="text-[10px] font-black text-[#22c55e] leading-none">{stats.easy}</div>
+                        <div className="text-[6px] font-bold text-gray-400 uppercase">Easy</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-black text-[#3b82f6] leading-none">{stats.hard}</div>
+                        <div className="text-[6px] font-bold text-gray-400 uppercase">Hard</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-black text-orange-400 leading-none">{stats.skip}</div>
+                        <div className="text-[6px] font-bold text-gray-400 uppercase">Skip</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-black text-red-500 leading-none">{stats.penalties}</div>
+                        <div className="text-[6px] font-bold text-gray-400 uppercase">Pen</div>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-[9px] font-black uppercase text-gray-300 italic py-1">No turns recorded</div>
+              )}
             </div>
           </div>
         ))}
       </div>
 
       <button 
-        onClick={onReset}
-        className="w-full bg-[#1a1a1a] text-white py-6 rounded-full font-black text-3xl uppercase tracking-tighter shadow-[0_8px_0_0_#1a1a1a] active:translate-y-2 active:shadow-none transition-all flex items-center justify-center gap-4 mt-auto border-2 border-white"
+        onClick={onBack}
+        className="w-full bg-[#1a1a1a] text-white py-5 rounded-[2rem] font-black text-xl uppercase tracking-tighter shadow-[0_6px_0_#000000] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2 border-2 border-white"
       >
-        <RotateCcw className="w-8 h-8" /> New Game
+        <ChevronLeft className="w-5 h-5" /> Return To Game
       </button>
     </motion.div>
   );
 }
-function SetupView({ onComplete, onBack }: { onComplete: (mode: GameMode, parts: Participant[], rounds: number, duration: number) => void, onBack: () => void }) {
-  const [mode, setMode] = useState<GameMode>('teams');
-  const [count, setCount] = useState(2);
-  const [rounds, setRounds] = useState(2);
-  const [duration, setDuration] = useState(60);
-  const [names, setNames] = useState<string[]>(Array(20).fill(''));
-  const [memberInputs, setMemberInputs] = useState<string[][]>(Array(20).fill(null).map(() => ['']));
+
+function SetupView({ onComplete, onBack, initialData, isEditing = false }: { 
+  onComplete: (mode: GameMode, parts: Participant[], turnsPerTeam: number, duration: number, minTurns: number) => void, 
+  onBack: () => void,
+  initialData?: {
+    mode: GameMode,
+    participants: Participant[],
+    minTurnsPerPlayer: number,
+    duration: number
+  },
+  isEditing?: boolean
+}) {
+  const [mode, setMode] = useState<GameMode>(initialData?.mode || 'teams');
+  const [count, setCount] = useState(initialData?.participants.length || 2);
+  const [rounds, setRounds] = useState(initialData?.minTurnsPerPlayer || 2);
+  const [duration, setDuration] = useState(initialData?.duration || 60);
+
+  const [names, setNames] = useState<string[]>(() => {
+    const arr = Array(20).fill('');
+    if (initialData) {
+      initialData.participants.forEach((p, i) => {
+        if (i < 20) arr[i] = p.name;
+      });
+    }
+    return arr;
+  });
+
+  const [memberInputs, setMemberInputs] = useState<string[][]>(() => {
+    const arr = Array(20).fill(null).map(() => ['']);
+    if (initialData) {
+      initialData.participants.forEach((p, i) => {
+        if (i < 20) arr[i] = p.members.length > 0 ? p.members : [''];
+      });
+    }
+    return arr;
+  });
+
+  const getTeamMemberCount = (i: number) => {
+    if (mode === 'solo') return 1;
+    const list = memberInputs[i].filter(m => m.trim() !== '');
+    return list.length || 1;
+  };
+
+  const maxPlayersOnAnyTeam = mode === 'solo' 
+    ? 1 
+    : Math.max(...Array.from({ length: count }, (_, i) => getTeamMemberCount(i)));
+  
+  const turnsPerTeam = maxPlayersOnAnyTeam * rounds;
+  const totalRounds = turnsPerTeam * count;
 
   const handleStart = () => {
-    const participants: Participant[] = [];
+    const parts: Participant[] = [];
     for (let i = 0; i < count; i++) {
       const name = names[i].trim() || (mode === 'teams' ? `${TEAM_COLORS[i].name} Team` : `Player ${i + 1}`);
-      participants.push({
-        id: i,
+      const existingId = initialData?.participants[i]?.id;
+      parts.push({
+        id: existingId ?? i,
         name,
         color: TEAM_COLORS[i].hex,
         members: mode === 'teams' ? memberInputs[i].filter(m => m.trim() !== '') : [],
         score: 0,
         totalCorrect: 0,
-        totalPenalties: 0
+        totalPenalties: 0,
+        playerStats: {}
       });
     }
-    onComplete(mode, participants, rounds, duration);
+    onComplete(mode, parts, turnsPerTeam, duration, rounds);
   };
 
   const updateMember = (pIdx: number, mIdx: number, val: string) => {
@@ -899,15 +1297,12 @@ function SetupView({ onComplete, onBack }: { onComplete: (mode: GameMode, parts:
   };
 
   return (
-    <motion.div 
-      initial={{ opacity: 0, x: 20 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -20 }}
-      className="flex-1 flex flex-col gap-6 py-4"
-    >
-      <div className="flex items-center justify-between">
-        <button onClick={onBack} className="p-2 bg-white/20 rounded-full"><RotateCcw className="w-5 h-5"/></button>
-        <h2 className="text-3xl font-black uppercase tracking-tighter">Game Setup</h2>
+    <div className="flex-1 flex flex-col gap-6 py-4 h-full">
+      <div className="flex justify-between items-center px-4">
+        <button onClick={onBack} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-black/5 transition-colors">
+          <X className="w-8 h-8" />
+        </button>
+        <h2 className="text-3xl font-black uppercase tracking-tighter">{isEditing ? 'Reconfigure' : 'Game Setup'}</h2>
         <div className="w-9" />
       </div>
 
@@ -930,18 +1325,29 @@ function SetupView({ onComplete, onBack }: { onComplete: (mode: GameMode, parts:
         <div className="space-y-3">
           <label className="text-[10px] font-black uppercase opacity-60 ml-2">Number of {mode === 'teams' ? 'Teams' : 'Players'}</label>
           <div className="flex items-center gap-4 bg-white border-4 border-[#1a1a1a] p-3 rounded-2xl justify-between">
-            <button onClick={() => setCount(Math.max(1, count - 1))} className="p-2 bg-[#1a1a1a] text-white rounded-lg active:scale-95"><Minus className="w-5 h-5"/></button>
+            <button onClick={() => setCount(Math.max(2, count - 1))} className="p-2 bg-[#1a1a1a] text-white rounded-lg active:scale-95"><Minus className="w-5 h-5"/></button>
             <span className="text-2xl font-black">{count}</span>
             <button onClick={() => setCount(Math.min(20, count + 1))} className="p-2 bg-[#1a1a1a] text-white rounded-lg active:scale-95"><Plus className="w-5 h-5"/></button>
           </div>
         </div>
 
         <div className="space-y-3">
-          <label className="text-[10px] font-black uppercase opacity-60 ml-2">Turns per {mode === 'teams' ? 'Team' : 'Player'}</label>
+          <label className="text-[10px] font-black uppercase opacity-60 ml-2">Min Turns per player</label>
           <div className="flex items-center gap-4 bg-white border-4 border-[#1a1a1a] p-3 rounded-2xl justify-between">
             <button onClick={() => setRounds(Math.max(1, rounds - 1))} className="p-2 bg-[#1a1a1a] text-white rounded-lg active:scale-95"><Minus className="w-5 h-5"/></button>
             <span className="text-2xl font-black">{rounds}</span>
             <button onClick={() => setRounds(Math.min(10, rounds + 1))} className="p-2 bg-[#1a1a1a] text-white rounded-lg active:scale-95"><Plus className="w-5 h-5"/></button>
+          </div>
+          <div className="bg-[#FFD700] border-4 border-[#1a1a1a] p-3 rounded-2xl mx-1 shadow-[4px_4px_0_#1a1a1a]">
+            <div className="flex justify-between items-center">
+              <span className="text-[10px] font-black uppercase">Total Game Rounds</span>
+              <span className="text-xl font-black">{totalRounds}</span>
+            </div>
+            <p className="text-[9px] font-bold mt-1 opacity-70 leading-tight">
+              {mode === 'teams' 
+                ? `Each team plays ${turnsPerTeam} times so every member gets at least ${rounds} turns.` 
+                : `Each player plays ${rounds} turns for a total of ${totalRounds} rounds.`}
+            </p>
           </div>
         </div>
 
@@ -997,8 +1403,8 @@ function SetupView({ onComplete, onBack }: { onComplete: (mode: GameMode, parts:
         onClick={handleStart}
         className="w-full bg-[#1a1a1a] text-[#FFD700] py-6 rounded-full font-black text-3xl uppercase tracking-tighter shadow-[0_8px_0_0_#1a1a1a] active:translate-y-2 active:shadow-none transition-all flex items-center justify-center gap-4 border-2 border-white mt-auto"
       >
-        Start Game <ChevronRight className="w-8 h-8" />
+        {isEditing ? 'Save Changes' : 'Start Game'} <ChevronRight className="w-8 h-8" />
       </button>
-    </motion.div>
+    </div>
   );
 }
