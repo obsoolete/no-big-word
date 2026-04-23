@@ -14,10 +14,13 @@ A hilarious, fast-paced word-guessing game where you must describe complex conce
 ## 🚀 Features
 
 -   **Team & Solo Modes**: Play with 2 to 20 participants.
+-   **Mobile Optimized**: Responsive design that fits perfectly on smartphones with internal scrolling and visible scrollbars.
 -   **Specific Player Roles**: The game tracks whose turn it is to talk and who is the current judge by name.
--   **Huge Word Library**: Over 700 curated word pairs (Easy 1pt words and 2-word Hard 3pt items).
--   **Vibrant UI**: Beautifully animated interface with a high-contrast palette.
--   **Dynamic Leaderboard**: Track scores and statistics (correct guesses vs. penalties) throughout the game.
+-   **Detailed Turn History**: Review every card played during a turn, allowing the judge/talker to refine scores after the timer ends.
+-   **Advanced Player Stats**: Track per-player performance including total points, skips, and penalties.
+-   **Scoreboard & Team Tracker**: Access a live scoreboard and team roster at any time via the settings menu.
+-   **Smart Word Pool**: Cards are never repeated within a session until all 700+ word pairs are exhausted.
+-   **Vibrant UI**: Modern, high-contrast animated interface designed for readability and fun.
 
 ## 🛠️ Local Development
 

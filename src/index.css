@@ -9,19 +9,19 @@
 /* Global Scrollbar Customization */
 @layer base {
   ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 6px;
+    height: 6px;
   }
 
   ::-webkit-scrollbar-track {
-    background: transparent;
+    background: rgba(0, 0, 0, 0.05);
+    border-radius: 10px;
   }
 
   ::-webkit-scrollbar-thumb {
     background: #1a1a1a;
-    border: 2px solid transparent;
-    background-clip: padding-box;
     border-radius: 10px;
+    border: 1px solid white;
   }
 
   ::-webkit-scrollbar-thumb:hover {
@@ -40,6 +40,6 @@
   /* Firefox support */
   * {
     scrollbar-width: thin;
-    scrollbar-color: #1a1a1a transparent;
+    scrollbar-color: #1a1a1a rgba(0, 0, 0, 0.05);
   }
 }

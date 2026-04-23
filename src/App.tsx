@@ -8,8 +8,10 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Timer, Trophy, Shield, Users, Info, ChevronRight, ChevronLeft, RotateCcw, AlertTriangle, Hammer, Trash2, Plus, Minus, User, Swords, Settings, X, LogOut, RefreshCw, PlayCircle } from 'lucide-react';
 import { INITIAL_CARDS, CardItem } from './constants';
 import { countSyllables } from './gameService';
+import pkg from '../package.json';
 
 const SAVE_KEY = 'no_big_word_v3';
+const APP_VERSION = pkg.version;
 
 const playSound = (type: 'tick' | 'buzzer' | 'penalty' | 'correct') => {
   const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -544,7 +546,7 @@ export default function App() {
                       </button>
 
                       <div className="mt-8 text-center text-[10px] font-black uppercase tracking-widest opacity-20">
-                        Version 1.0.2
+                        Version {APP_VERSION}
                       </div>
                     </div>
               </motion.div>
@@ -552,7 +554,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <main className="relative max-w-lg mx-auto min-h-screen flex flex-col p-6">
+      <main className="relative max-w-lg mx-auto h-[100dvh] flex flex-col px-4 sm:px-6 py-2 overflow-hidden">
         <AnimatePresence mode="wait">
           {gameState === 'welcome' && (
             <WelcomeView onGoToSetup={() => setGameState('setup')} />
@@ -686,115 +688,113 @@ function RoundConfirmationView({ participants, currentIdx, initialHistory, onCon
     <motion.div 
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
-      className="flex-1 flex flex-col gap-6 py-4 h-full"
+      className="flex-1 flex flex-col gap-4 py-4 h-full"
     >
-      <div className="flex flex-col items-center text-center space-y-2 w-full">
-        <div className="inline-block px-4 py-1 rounded-full text-[10px] font-black text-white uppercase mb-1" style={{ backgroundColor: currentP?.color || '#1a1a1a' }}>
-          {currentP?.name}'s Result
+      <div className="flex-1 overflow-y-auto space-y-6 pr-2">
+        <div className="flex flex-col items-center text-center space-y-2 w-full pt-2">
+          <div className="inline-block px-4 py-1 rounded-full text-[10px] font-black text-white uppercase mb-1" style={{ backgroundColor: currentP?.color || '#1a1a1a' }}>
+            {currentP?.name}'s Result
+          </div>
+          <h2 className="text-4xl font-black uppercase tracking-tighter text-[#1a1a1a]">
+            Review Turn
+          </h2>
         </div>
-        <h2 className="text-4xl font-black uppercase tracking-tighter text-[#1a1a1a]">
-          Review Turn
-        </h2>
-      </div>
 
-      <div className="bg-white border-4 border-[#1a1a1a] rounded-[2rem] p-6 text-center shadow-[6px_6px_0_#1a1a1a]">
-        <div className="text-5xl font-black text-[#4F46E5]">{stats.score}</div>
-        <div className="text-[10px] font-black uppercase opacity-60">Total Points Won This Turn</div>
-      </div>
+        <div className="bg-white border-4 border-[#1a1a1a] rounded-[2rem] p-6 text-center shadow-[6px_6px_0_#1a1a1a]">
+          <div className="text-5xl font-black text-[#4F46E5]">{stats.score}</div>
+          <div className="text-[10px] font-black uppercase opacity-60">Total Points Won This Turn</div>
+        </div>
 
-      <div className="bg-white border-4 border-[#1a1a1a] rounded-[2rem] p-4 shadow-[6px_6px_0_#1a1a1a]">
-        <h3 className="text-[10px] font-black uppercase mb-3 text-center opacity-40 italic">Turn Statistics</h3>
-        <div className="grid grid-cols-4 gap-2">
-          <div className="text-center">
-            <div className="text-xl font-black text-[#22c55e]">{stats.easy}</div>
-            <div className="text-[8px] font-black uppercase opacity-60">Easy</div>
-          </div>
-          <div className="text-center">
-            <div className="text-xl font-black text-[#3b82f6]">{stats.hard}</div>
-            <div className="text-[8px] font-black uppercase opacity-60">Hard</div>
-          </div>
-          <div className="text-center">
-            <div className="text-xl font-black text-gray-400">{stats.skip}</div>
-            <div className="text-[8px] font-black uppercase opacity-60">Skip</div>
-          </div>
-          <div className="text-center">
-            <div className="text-xl font-black text-[#ef4444]">{stats.penalties}</div>
-            <div className="text-[8px] font-black uppercase opacity-60">Penalty</div>
+        <div className="bg-white border-4 border-[#1a1a1a] rounded-[2rem] p-4 shadow-[6px_6px_0_#1a1a1a]">
+          <h3 className="text-[10px] font-black uppercase mb-3 text-center opacity-40 italic">Turn Statistics</h3>
+          <div className="grid grid-cols-4 gap-2">
+            {[
+              { val: stats.easy, label: 'Easy', color: 'text-[#22c55e]' },
+              { val: stats.hard, label: 'Hard', color: 'text-[#3b82f6]' },
+              { val: stats.skip, label: 'Skip', color: 'text-gray-400' },
+              { val: stats.penalties, label: 'Penalty', color: 'text-[#ef4444]' }
+            ].map((s, i) => (
+              <div key={i} className="text-center">
+                <div className={`text-xl font-black ${s.color}`}>{s.val}</div>
+                <div className="text-[8px] font-black uppercase opacity-60">{s.label}</div>
+              </div>
+            ))}
           </div>
         </div>
-      </div>
 
-      <div className="flex-1 overflow-y-auto no-scrollbar space-y-4 pr-1 min-h-0">
-        <h3 className="text-[10px] font-black uppercase opacity-40 ml-2">Review All Cards</h3>
-        {history.map((item, idx) => (
-          <div key={idx} className="bg-white border-4 border-[#1a1a1a] rounded-[2rem] p-5 shadow-[6px_6px_0_#1a1a1a] space-y-4">
-            <div className="space-y-3">
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[7px] font-black uppercase tracking-widest text-[#22c55e]">Easy Word</span>
-                <div className="text-xl font-black tracking-tighter leading-none text-[#1a1a1a]">{item.card.word}</div>
-              </div>
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[7px] font-black uppercase tracking-widest text-[#3b82f6]">Hard Phrase</span>
-                <div className="text-sm font-bold text-slate-600 italic tracking-tight leading-none">{item.card.phrase}</div>
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-5 gap-1.5">
-              {[
-                { id: 'none', label: 'None', active: 'bg-gray-200 text-gray-600', inactive: 'bg-gray-50 text-gray-400' },
-                { id: 'easy', label: 'Easy', active: 'bg-[#22c55e] text-white', inactive: 'bg-[#22c55e]/10 text-[#22c55e]' },
-                { id: 'hard', label: 'Hard', active: 'bg-[#3b82f6] text-white', inactive: 'bg-[#3b82f6]/10 text-[#3b82f6]' },
-                { id: 'skip', label: 'Skip', active: 'bg-gray-500 text-white', inactive: 'bg-gray-500/10 text-gray-500' },
-                { id: 'penalty', label: 'Penalty', active: 'bg-[#ef4444] text-white', inactive: 'bg-[#ef4444]/10 text-[#ef4444]' }
-              ].map(opt => (
-                <button
-                  key={opt.id}
-                  onClick={() => updateResult(idx, opt.id as any)}
-                  className={`py-2 rounded-lg font-black text-[8px] uppercase transition-all border-2 ${
-                    item.result === opt.id 
-                      ? `${opt.active} border-[#1a1a1a] translate-y-0.5 shadow-none` 
-                      : `${opt.inactive} border-transparent opacity-60 hover:opacity-100 hover:border-[#1a1a1a]/10`
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        ))}
-        <div className="pb-8" />
-      </div>
-
-      <div className="bg-white rounded-[2rem] p-6 text-[#1a1a1a] border-4 border-[#1a1a1a] shadow-[6px_6px_0_#1a1a1a] overflow-y-auto max-h-[25vh] no-scrollbar shrink-0">
-        <h4 className="text-center text-[10px] font-black uppercase tracking-widest mb-4 opacity-40">Leaderboard Preview</h4>
-        <div className="space-y-3">
-          {[...participants].sort((a, b) => {
-            const scoreA = a.id === currentP?.id ? a.score + stats.score : a.score;
-            const scoreB = b.id === currentP?.id ? b.score + stats.score : b.score;
-            return scoreB - scoreA;
-          }).map((p, i) => {
-            const isCurrent = p.id === currentP?.id;
-            return (
-              <div key={p.id} className={`flex justify-between items-center transition-all ${isCurrent ? 'scale-105' : 'opacity-80'}`}>
-                <div className="flex items-center gap-3">
-                  <div className="w-6 h-6 rounded-full border-2 border-[#1a1a1a] flex items-center justify-center font-black text-[8px]" style={{ backgroundColor: p.color }}>{i+1}</div>
-                  <span className={`font-black uppercase tracking-tight text-[10px] ${isCurrent ? 'text-[#4F46E5]' : 'text-[#1a1a1a]'}`}>{p.name}</span>
+        <div className="space-y-4">
+          <h3 className="text-[10px] font-black uppercase opacity-40 ml-2">Review All Cards</h3>
+          {history.map((item, idx) => (
+            <div key={idx} className="bg-white border-4 border-[#1a1a1a] rounded-[2rem] p-5 shadow-[6px_6px_0_#1a1a1a] space-y-4">
+              <div className="space-y-3">
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-[7px] font-black uppercase tracking-widest text-[#22c55e]">Easy Word</span>
+                  <div className="text-xl font-black tracking-tighter leading-none text-[#1a1a1a]">{item.card.word}</div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {isCurrent && <span className="text-[9px] font-black opacity-40 text-[#4F46E5]">{p.score} + {stats.score} =</span>}
-                  <span className={`text-sm font-black ${isCurrent ? 'text-[#4F46E5]' : 'text-[#1a1a1a]'}`}>
-                    {isCurrent ? p.score + stats.score : p.score}
-                  </span>
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-[7px] font-black uppercase tracking-widest text-[#3b82f6]">Hard Phrase</span>
+                  <div className="text-sm font-bold text-slate-600 italic tracking-tight leading-none">{item.card.phrase}</div>
                 </div>
               </div>
-            );
-          })}
+              
+              <div className="grid grid-cols-5 gap-1.5">
+                {[
+                  { id: 'none', label: 'None', active: 'bg-gray-200 text-gray-600', inactive: 'bg-gray-50 text-gray-400' },
+                  { id: 'easy', label: 'Easy', active: 'bg-[#22c55e] text-white', inactive: 'bg-[#22c55e]/10 text-[#22c55e]' },
+                  { id: 'hard', label: 'Hard', active: 'bg-[#3b82f6] text-white', inactive: 'bg-[#3b82f6]/10 text-[#3b82f6]' },
+                  { id: 'skip', label: 'Skip', active: 'bg-gray-500 text-white', inactive: 'bg-gray-500/10 text-gray-500' },
+                  { id: 'penalty', label: 'Penalty', active: 'bg-[#ef4444] text-white', inactive: 'bg-[#ef4444]/10 text-[#ef4444]' }
+                ].map(opt => (
+                  <button
+                    key={opt.id}
+                    onClick={() => updateResult(idx, opt.id as any)}
+                    className={`py-2 rounded-lg font-black text-[8px] uppercase transition-all border-2 ${
+                      item.result === opt.id 
+                        ? `${opt.active} border-[#1a1a1a] translate-y-0.5 shadow-none` 
+                        : `${opt.inactive} border-transparent opacity-60 hover:opacity-100 hover:border-[#1a1a1a]/10`
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+          <div className="h-4" />
         </div>
+
+        <div className="bg-white rounded-[2rem] p-6 text-[#1a1a1a] border-4 border-[#1a1a1a] shadow-[6px_6px_0_#1a1a1a]">
+          <h4 className="text-center text-[10px] font-black uppercase tracking-widest mb-4 opacity-40">Leaderboard Preview</h4>
+          <div className="space-y-3">
+            {[...participants].sort((a, b) => {
+              const scoreA = a.id === currentP?.id ? a.score + stats.score : a.score;
+              const scoreB = b.id === currentP?.id ? b.score + stats.score : b.score;
+              return scoreB - scoreA;
+            }).map((p, i) => {
+              const isCurrent = p.id === currentP?.id;
+              return (
+                <div key={p.id} className={`flex justify-between items-center transition-all ${isCurrent ? 'scale-105' : 'opacity-80'}`}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-6 h-6 rounded-full border-2 border-[#1a1a1a] flex items-center justify-center font-black text-[8px]" style={{ backgroundColor: p.color }}>{i+1}</div>
+                    <span className={`font-black uppercase tracking-tight text-[10px] ${isCurrent ? 'text-[#4F46E5]' : 'text-[#1a1a1a]'}`}>{p.name}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {isCurrent && <span className="text-[9px] font-black opacity-40 text-[#4F46E5]">{p.score} + {stats.score} =</span>}
+                    <span className={`text-sm font-black ${isCurrent ? 'text-[#4F46E5]' : 'text-[#1a1a1a]'}`}>
+                      {isCurrent ? p.score + stats.score : p.score}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <div className="h-2" />
       </div>
 
       <button 
         onClick={() => onConfirm(stats.score, stats.easy, stats.hard, stats.skip, stats.penalties)}
-        className="bg-[#1a1a1a] text-white py-6 rounded-full font-black text-2xl uppercase tracking-tighter shadow-[0_8px_0_0_#1a1a1a] active:translate-y-2 active:shadow-none transition-all flex items-center justify-center gap-2 border-2 border-white mb-2"
+        className="flex-shrink-0 bg-[#1a1a1a] text-white py-6 rounded-full font-black text-2xl uppercase tracking-tighter shadow-[0_8px_0_0_#1a1a1a] active:translate-y-2 active:shadow-none transition-all flex items-center justify-center gap-2 border-2 border-white mb-2 mt-auto"
       >
         Confirm Score <ChevronRight className="w-6 h-6" />
       </button>
@@ -808,30 +808,30 @@ function WelcomeView({ onGoToSetup }: { onGoToSetup: () => void }) {
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 1.1 }}
-      className="flex-1 flex flex-col justify-center gap-10"
+      className="flex-1 flex flex-col justify-center gap-6 py-4 overflow-y-auto pr-2"
     >
-      <div className="flex flex-col items-center text-center space-y-2 w-full">
-        <h1 className="text-6xl sm:text-7xl font-black tracking-tighter uppercase leading-none text-[#1a1a1a] drop-shadow-[0_8px_0_px_#FF4500] w-full break-words">
+      <div className="flex-shrink-0 flex flex-col items-center text-center space-y-2 w-full pt-4">
+        <h1 className="text-5xl sm:text-7xl font-black tracking-tighter uppercase leading-none text-[#1a1a1a] drop-shadow-[0_8px_0_px_#FF4500] w-full break-words">
           NO BIG WORD
         </h1>
-        <p className="text-sm font-mono uppercase tracking-[0.3em] text-[#1a1a1a] font-black">Syllable Challenge</p>
+        <p className="text-[10px] sm:text-sm font-mono uppercase tracking-[0.3em] text-[#1a1a1a] font-black">Syllable Challenge</p>
       </div>
 
-      <div className="bg-white border-[6px] border-[#1a1a1a] p-8 rounded-[3rem] shadow-[8px_8px_0_0_#1a1a1a] space-y-6">
-        <h2 className="text-3xl font-black flex items-center gap-2 uppercase italic text-[#1a1a1a]">
+      <div className="bg-white border-[6px] border-[#1a1a1a] p-6 sm:p-8 rounded-[3rem] shadow-[8px_8px_0_0_#1a1a1a] space-y-4 sm:space-y-6">
+        <h2 className="text-2xl sm:text-3xl font-black flex items-center gap-2 uppercase italic text-[#1a1a1a]">
           <Info className="w-8 h-8 text-[#4F46E5]" /> Rules
         </h2>
-        <ul className="space-y-6 text-sm font-bold">
+        <ul className="space-y-4 sm:space-y-6 text-xs sm:text-sm font-bold">
           <li className="flex gap-4 items-start">
-            <span className="bg-[#4F46E5] text-white w-8 h-8 rounded-xl flex items-center justify-center shrink-0 text-sm rotate-3">1</span>
+            <span className="bg-[#4F46E5] text-white w-7 h-7 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center shrink-0 text-sm rotate-3">1</span>
             <span className="leading-tight pt-1">Describe words using <strong className="text-[#4F46E5] uppercase">ONLY ONE SYLLABLE</strong>.</span>
           </li>
           <li className="flex gap-4 items-start">
-            <span className="bg-[#E11D48] text-white w-8 h-8 rounded-xl flex items-center justify-center shrink-0 text-sm -rotate-3">2</span>
+            <span className="bg-[#E11D48] text-white w-7 h-7 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center shrink-0 text-sm -rotate-3">2</span>
             <span className="leading-tight pt-1">Accidentally use a big word? <strong className="text-[#E11D48] uppercase">PENALTY!</strong></span>
           </li>
           <li className="flex gap-4 items-start">
-            <span className="bg-[#059669] text-white w-8 h-8 rounded-xl flex items-center justify-center shrink-0 text-sm rotate-6">3</span>
+            <span className="bg-[#059669] text-white w-7 h-7 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center shrink-0 text-sm rotate-6">3</span>
             <span className="leading-tight pt-1">Higher points for <strong className="text-[#059669] uppercase">Harder Words!</strong></span>
           </li>
         </ul>
@@ -839,7 +839,7 @@ function WelcomeView({ onGoToSetup }: { onGoToSetup: () => void }) {
 
       <button 
         onClick={onGoToSetup}
-        className="w-full bg-[#1a1a1a] text-white py-8 rounded-full font-black text-4xl uppercase tracking-tighter shadow-[0_12px_0_0_#1a1a1a] active:translate-y-2 active:shadow-none transition-all flex items-center justify-center gap-4 border-4 border-white"
+        className="flex-shrink-0 w-full bg-[#1a1a1a] text-white py-6 sm:py-8 rounded-full font-black text-3xl sm:text-4xl uppercase tracking-tighter shadow-[0_12px_0_0_#1a1a1a] active:translate-y-2 active:shadow-none transition-all flex items-center justify-center gap-4 border-4 border-white mb-4"
       >
         Setup Game <ChevronRight className="w-10 h-10" />
       </button>
@@ -855,7 +855,7 @@ function RoundPromptView({ participant, onStart, roundNumber, isSolo, talkerName
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 1.1 }}
-      className="flex-1 flex flex-col justify-center text-center gap-10"
+      className="flex-1 flex flex-col justify-center text-center gap-6 py-4 overflow-y-auto pr-2"
     >
       <div className="space-y-4">
         <div className="inline-block bg-[#1a1a1a] text-[#FFD700] px-6 py-2 rounded-xl text-sm font-black uppercase tracking-widest -rotate-2">Round {roundNumber}</div>
@@ -933,16 +933,16 @@ function PlayView({ card, timeLeft, roundPoints, onNext, participantName, partic
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="flex-1 flex flex-col gap-6"
+      className="h-full flex flex-col gap-4 overflow-y-auto pr-1"
     >
-      <div className="flex justify-between items-center bg-white p-4 rounded-[1.5rem] border-[4px] border-[#1a1a1a] shadow-[8px_8px_0_0_#1a1a1a]">
+      <div className="flex-shrink-0 flex justify-between items-center bg-white p-4 rounded-[1.5rem] border-[4px] border-[#1a1a1a] shadow-[8px_8px_0_0_#1a1a1a] mt-2">
         <div className="flex items-center gap-2">
           <Timer className={`w-6 h-6 ${timeLeft < 10 ? 'text-red-500 animate-bounce' : 'text-[#4F46E5]'}`} />
           <span className={`font-mono text-2xl font-black ${timeLeft < 10 ? 'text-red-500' : 'text-[#1a1a1a]'}`}>{timeLeft}s</span>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex flex-col items-end">
-            <span className="text-[10px] uppercase font-black opacity-40">{talkerName} ({participantName}) Score</span>
+            <span className="text-[10px] uppercase font-black opacity-40">{talkerName} Score</span>
             <span className="font-black text-2xl leading-none">{roundPoints}</span>
           </div>
           <div className="w-8 h-8 rounded-lg border-2 border-[#1a1a1a]" style={{ backgroundColor: participantColor }} />
@@ -953,42 +953,42 @@ function PlayView({ card, timeLeft, roundPoints, onNext, participantName, partic
         key={card.id}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.1 }}
-        className={`flex-1 bg-white border-[10px] border-[#1a1a1a] rounded-[3rem] flex flex-col overflow-hidden shadow-[8px_8px_0_0_#1a1a1a] relative transition-transform ${isPenaltyActive ? 'shake' : ''}`}
+        className={`flex-1 min-h-[300px] bg-white border-[10px] border-[#1a1a1a] rounded-[3rem] flex flex-col overflow-hidden shadow-[8px_8px_0_0_#1a1a1a] relative transition-transform ${isPenaltyActive ? 'shake' : ''}`}
       >
         <div className="bg-[#1a1a1a] text-white p-3 text-center">
           <div className="text-[12px] uppercase font-black tracking-[0.3em]">NO BIG WORD</div>
         </div>
         
-        <div className="flex-1 flex flex-col items-center justify-center p-8 gap-10">
+        <div className="flex-1 flex flex-col items-center justify-center p-6 gap-6">
           <div className="text-center">
-            <div className="inline-block bg-[#22c55e] text-white px-3 py-0.5 rounded text-[10px] font-black uppercase mb-3">Easy (1 Point)</div>
-            <div className="text-5xl font-black text-[#1a1a1a] tracking-tighter leading-none break-words">
+            <div className="inline-block bg-[#22c55e] text-white px-3 py-0.5 rounded text-[10px] font-black uppercase mb-2">Easy (1 Point)</div>
+            <div className="text-4xl sm:text-5xl font-black text-[#1a1a1a] tracking-tighter leading-none break-words">
               {card.word}
             </div>
           </div>
 
-          <div className="w-1/2 h-2 bg-[#1a1a1a] rounded-full opacity-10" />
+          <div className="w-1/2 h-1 bg-[#1a1a1a] rounded-full opacity-10" />
 
           <div className="text-center">
-            <div className="inline-block bg-[#3b82f6] text-white px-3 py-0.5 rounded text-[10px] font-black uppercase mb-3">Hard (3 Points)</div>
-            <div className="text-3xl font-black text-slate-600 leading-tight italic">
+            <div className="inline-block bg-[#3b82f6] text-white px-3 py-0.5 rounded text-[10px] font-black uppercase mb-2">Hard (3 Points)</div>
+            <div className="text-2xl sm:text-3xl font-black text-slate-600 leading-tight italic">
               {card.phrase}
             </div>
           </div>
         </div>
 
-        <div className="p-4 bg-yellow-50 text-center text-[11px] uppercase font-black text-[#1a1a1a] border-t-[4px] border-[#1a1a1a]">
+        <div className="p-3 bg-yellow-50 text-center text-[10px] uppercase font-black text-[#1a1a1a] border-t-[4px] border-[#1a1a1a]">
           ONE SYLLABLE WORDS ONLY!
         </div>
       </motion.div>
 
-      <div className="grid grid-cols-2 gap-4 pb-8">
-        <button onClick={() => onNext(1)} className="bg-[#22c55e] text-white py-6 rounded-[2rem] font-black text-2xl uppercase tracking-tighter border-4 border-[#1a1a1a] shadow-[0_6px_0_0_#1a1a1a] active:translate-y-1 active:shadow-none transition-all">EASY</button>
-        <button onClick={() => onNext(3)} className="bg-[#3b82f6] text-white py-6 rounded-[2rem] font-black text-2xl uppercase tracking-tighter border-4 border-[#1a1a1a] shadow-[0_6px_0_0_#1a1a1a] active:translate-y-1 active:shadow-none transition-all">HARD</button>
-        <button onClick={() => onNext(-1, true)} className="col-span-1 bg-white text-[#1a1a1a] py-6 rounded-[2rem] font-black flex items-center justify-center gap-2 border-4 border-[#1a1a1a] shadow-[0_6px_0_0_#1a1a1a] active:translate-y-1 active:shadow-none transition-all text-xl uppercase tracking-tighter">
+      <div className="flex-shrink-0 grid grid-cols-2 gap-3 pb-4">
+        <button onClick={() => onNext(1)} className="bg-[#22c55e] text-white py-5 rounded-[2rem] font-black text-4xl uppercase tracking-tighter border-4 border-[#1a1a1a] shadow-[0_6px_0_0_#1a1a1a] active:translate-y-1 active:shadow-none transition-all">EASY</button>
+        <button onClick={() => onNext(3)} className="bg-[#3b82f6] text-white py-6 rounded-[2rem] font-black text-4xl uppercase tracking-tighter border-4 border-[#1a1a1a] shadow-[0_6px_0_0_#1a1a1a] active:translate-y-1 active:shadow-none transition-all">HARD</button>
+        <button onClick={() => onNext(-1, true)} className="col-span-1 bg-white text-[#1a1a1a] py-5 rounded-[2rem] font-black flex items-center justify-center gap-2 border-4 border-[#1a1a1a] shadow-[0_6px_0_0_#1a1a1a] active:translate-y-1 active:shadow-none transition-all text-lg uppercase tracking-tighter">
           SKIP
         </button>
-        <button onClick={() => onNext(-1)} className="col-span-1 bg-[#E11D48] text-white py-6 rounded-[2rem] font-black flex items-center justify-center gap-2 border-4 border-[#1a1a1a] shadow-[0_6px_0_0_#1a1a1a] active:translate-y-1 active:shadow-none transition-all text-xl uppercase tracking-tighter">
+        <button onClick={() => onNext(-1)} className="col-span-1 bg-[#E11D48] text-white py-5 rounded-[2rem] font-black flex items-center justify-center gap-2 border-4 border-[#1a1a1a] shadow-[0_6px_0_0_#1a1a1a] active:translate-y-1 active:shadow-none transition-all text-lg uppercase tracking-tighter">
           PENALTY!
         </button>
       </div>
@@ -1016,14 +1016,14 @@ function GameOverView({ participants, onReset, onRematch, onReconfigure }: {
     <motion.div 
       initial={{ opacity: 0, y: 50 }}
       animate={{ opacity: 1, y: 0 }}
-      className="flex-1 flex flex-col justify-center items-center text-center gap-6 py-4"
+      className="h-full flex flex-col justify-center items-center text-center gap-6 py-4"
     >
-      <div className="relative">
+      <div className="relative flex-shrink-0">
         <Trophy className="w-24 h-24 text-[#FFD700] drop-shadow-[0_8px_0_#1a1a1a] relative z-10" />
         <div className="absolute inset-0 bg-[#4F46E5] rounded-full blur-3xl opacity-20 animate-pulse" />
       </div>
       
-      <div>
+      <div className="flex-shrink-0">
         <h2 className="text-5xl font-black text-[#1a1a1a] tracking-tighter uppercase leading-none drop-shadow-[0_4px_0_#FF4500]">
           {winner ? 'Winner!' : 'It\'s a Tie!'}
         </h2>
@@ -1036,7 +1036,7 @@ function GameOverView({ participants, onReset, onRematch, onReconfigure }: {
         )}
       </div>
 
-      <div className="w-full space-y-3 max-h-[50vh] overflow-y-auto pr-4 pb-4 no-scrollbar">
+      <div className="flex-1 w-full space-y-3 overflow-y-auto pr-4 pb-4">
         {sorted.map((p, i) => (
           <div key={p.id} className="border-[4px] border-[#1a1a1a] p-4 rounded-[2rem] flex flex-col shadow-[6px_6px_0_#1a1a1a] bg-white relative overflow-hidden">
             {/* Color Ribbon */}
@@ -1100,7 +1100,7 @@ function GameOverView({ participants, onReset, onRematch, onReconfigure }: {
         ))}
       </div>
 
-      <div className="w-full grid grid-cols-2 gap-3">
+      <div className="flex-shrink-0 w-full grid grid-cols-2 gap-3 mt-auto">
         <button 
           onClick={onRematch}
           className="bg-[#22c55e] text-white py-4 rounded-3xl font-black uppercase tracking-tight text-lg shadow-[0_6px_0_#166534] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2 border-2 border-white"
@@ -1117,7 +1117,7 @@ function GameOverView({ participants, onReset, onRematch, onReconfigure }: {
 
       <button 
         onClick={onReset}
-        className="w-full bg-[#1a1a1a] text-white py-4 rounded-3xl font-black uppercase tracking-tight text-lg shadow-[0_6px_0_#000000] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2 border-2 border-white"
+        className="flex-shrink-0 w-full bg-[#1a1a1a] text-white py-4 rounded-3xl font-black uppercase tracking-tight text-lg shadow-[0_6px_0_#000000] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2 border-2 border-white"
       >
         <LogOut className="w-5 h-5" /> Quit to Title
       </button>
@@ -1132,16 +1132,16 @@ function ScoreboardView({ participants, onBack }: { participants: Participant[],
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 1.05 }}
-      className="flex-1 flex flex-col gap-6 py-4"
+      className="h-full flex flex-col gap-6 py-4"
     >
-      <div className="flex flex-col items-center text-center space-y-1 w-full mt-4">
+      <div className="flex-shrink-0 flex flex-col items-center text-center space-y-1 w-full mt-4">
         <h2 className="text-4xl font-black text-[#1a1a1a] tracking-tight uppercase leading-none drop-shadow-[0_4px_0_#FF4500]">
           Scoreboard
         </h2>
         <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-[#1a1a1a] font-bold opacity-40">Current Standings & Teams</p>
       </div>
 
-      <div className="w-full space-y-4 max-h-[60vh] overflow-y-auto pr-2 pb-4 no-scrollbar">
+      <div className="flex-1 w-full space-y-4 overflow-y-auto pr-2 pb-4">
         {sorted.map((p, i) => (
           <div key={p.id} className="border-[4px] border-[#1a1a1a] p-5 rounded-[2.5rem] flex flex-col shadow-[8px_8px_0_#1a1a1a] bg-white relative overflow-hidden">
             {/* Color Ribbon */}
@@ -1208,7 +1208,7 @@ function ScoreboardView({ participants, onBack }: { participants: Participant[],
 
       <button 
         onClick={onBack}
-        className="w-full bg-[#1a1a1a] text-white py-5 rounded-[2rem] font-black text-xl uppercase tracking-tighter shadow-[0_6px_0_#000000] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2 border-2 border-white"
+        className="flex-shrink-0 w-full bg-[#1a1a1a] text-white py-5 rounded-[2rem] font-black text-xl uppercase tracking-tighter shadow-[0_6px_0_#000000] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2 border-2 border-white mt-auto"
       >
         <ChevronLeft className="w-5 h-5" /> Return To Game
       </button>
@@ -1297,8 +1297,8 @@ function SetupView({ onComplete, onBack, initialData, isEditing = false }: {
   };
 
   return (
-    <div className="flex-1 flex flex-col gap-6 py-4 h-full">
-      <div className="flex justify-between items-center px-4">
+    <div className="h-full flex flex-col gap-6 py-4">
+      <div className="flex justify-between items-center px-4 flex-shrink-0">
         <button onClick={onBack} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-black/5 transition-colors">
           <X className="w-8 h-8" />
         </button>
@@ -1306,7 +1306,7 @@ function SetupView({ onComplete, onBack, initialData, isEditing = false }: {
         <div className="w-9" />
       </div>
 
-      <div className="grid grid-cols-2 gap-2 p-1 bg-[#1a1a1a] rounded-2xl">
+      <div className="grid grid-cols-2 gap-2 p-1 bg-[#1a1a1a] rounded-2xl flex-shrink-0">
         <button 
           onClick={() => setMode('teams')}
           className={`flex items-center justify-center gap-2 py-3 rounded-xl font-black uppercase text-xs transition-all ${mode === 'teams' ? 'bg-[#FFD700] text-[#1a1a1a]' : 'text-white hover:bg-white/10'}`}
@@ -1321,7 +1321,7 @@ function SetupView({ onComplete, onBack, initialData, isEditing = false }: {
         </button>
       </div>
 
-      <div className="space-y-6 overflow-y-auto max-h-[60vh] pr-4 pb-8">
+      <div className="flex-1 space-y-6 overflow-y-auto pr-4 pb-4">
         <div className="space-y-3">
           <label className="text-[10px] font-black uppercase opacity-60 ml-2">Number of {mode === 'teams' ? 'Teams' : 'Players'}</label>
           <div className="flex items-center gap-4 bg-white border-4 border-[#1a1a1a] p-3 rounded-2xl justify-between">
@@ -1401,7 +1401,7 @@ function SetupView({ onComplete, onBack, initialData, isEditing = false }: {
 
       <button 
         onClick={handleStart}
-        className="w-full bg-[#1a1a1a] text-[#FFD700] py-6 rounded-full font-black text-3xl uppercase tracking-tighter shadow-[0_8px_0_0_#1a1a1a] active:translate-y-2 active:shadow-none transition-all flex items-center justify-center gap-4 border-2 border-white mt-auto"
+        className="flex-shrink-0 w-full bg-[#1a1a1a] text-[#FFD700] py-6 rounded-full font-black text-3xl uppercase tracking-tighter shadow-[0_8px_0_0_#1a1a1a] active:translate-y-2 active:shadow-none transition-all flex items-center justify-center gap-4 border-2 border-white mt-4"
       >
         {isEditing ? 'Save Changes' : 'Start Game'} <ChevronRight className="w-8 h-8" />
       </button>
