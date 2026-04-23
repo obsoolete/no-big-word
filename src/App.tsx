@@ -13,47 +13,64 @@ import pkg from '../package.json';
 const SAVE_KEY = 'no_big_word_v3';
 const APP_VERSION = pkg.version;
 
+let audioCtx: AudioContext | null = null;
+
+const getAudioContext = () => {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+  }
+  return audioCtx;
+};
+
 const playSound = (type: 'tick' | 'buzzer' | 'penalty' | 'correct') => {
-  const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
-  
-  osc.connect(gain);
-  gain.connect(ctx.destination);
-  
-  const now = ctx.currentTime;
-  
-  if (type === 'tick') {
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(880, now);
-    gain.gain.setValueAtTime(0.1, now);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.1);
-    osc.start(now);
-    osc.stop(now + 0.1);
-  } else if (type === 'buzzer') {
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(100, now);
-    osc.frequency.exponentialRampToValueAtTime(40, now + 0.5);
-    gain.gain.setValueAtTime(0.2, now);
-    gain.gain.linearRampToValueAtTime(0, now + 0.5);
-    osc.start(now);
-    osc.stop(now + 0.5);
-  } else if (type === 'penalty') {
-    osc.type = 'square';
-    osc.frequency.setValueAtTime(150, now);
-    osc.frequency.exponentialRampToValueAtTime(50, now + 0.2);
-    gain.gain.setValueAtTime(0.3, now);
-    gain.gain.linearRampToValueAtTime(0, now + 0.2);
-    osc.start(now);
-    osc.stop(now + 0.2);
-  } else if (type === 'correct') {
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(523.25, now); // C5
-    osc.frequency.exponentialRampToValueAtTime(1046.50, now + 0.2); // C6
-    gain.gain.setValueAtTime(0.1, now);
-    gain.gain.linearRampToValueAtTime(0, now + 0.2);
-    osc.start(now);
-    osc.stop(now + 0.2);
+  try {
+    const ctx = getAudioContext();
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(err => console.warn('AudioContext resume failed:', err));
+    }
+    
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    
+    const now = ctx.currentTime;
+    
+    if (type === 'tick') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, now);
+      gain.gain.setValueAtTime(0.1, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.1);
+      osc.start(now);
+      osc.stop(now + 0.1);
+    } else if (type === 'buzzer') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(100, now);
+      osc.frequency.exponentialRampToValueAtTime(40, now + 0.5);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.linearRampToValueAtTime(0, now + 0.5);
+      osc.start(now);
+      osc.stop(now + 0.5);
+    } else if (type === 'penalty') {
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(150, now);
+      osc.frequency.exponentialRampToValueAtTime(50, now + 0.2);
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.linearRampToValueAtTime(0, now + 0.2);
+      osc.start(now);
+      osc.stop(now + 0.2);
+    } else if (type === 'correct') {
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(523.25, now); // C5
+      osc.frequency.exponentialRampToValueAtTime(1046.50, now + 0.2); // C6
+      gain.gain.setValueAtTime(0.1, now);
+      gain.gain.linearRampToValueAtTime(0, now + 0.2);
+      osc.start(now);
+      osc.stop(now + 0.2);
+    }
+  } catch (e) {
+    console.error('Audio play error:', e);
   }
 };
 
@@ -128,9 +145,25 @@ export default function App() {
   const [activeFeedback, setActiveFeedback] = useState<FeedbackType | null>(null);
   const [roundsPlayed, setRoundsPlayed] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
+  const [pendingReset, setPendingReset] = useState<'game' | 'title' | null>(null);
   const [roundHistory, setRoundHistory] = useState<HistoryItem[]>([]);
   const [usedCardIds, setUsedCardIds] = useState<number[]>([]);
   const [previousGameState, setPreviousGameState] = useState<GameState | null>(null);
+
+  // interaction listener for audio unlock
+  useEffect(() => {
+    const unlock = () => {
+      if (audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    };
+    window.addEventListener('touchstart', unlock);
+    window.addEventListener('click', unlock);
+    return () => {
+      window.removeEventListener('touchstart', unlock);
+      window.removeEventListener('click', unlock);
+    };
+  }, []);
 
   // Load state on mount
   useEffect(() => {
@@ -450,7 +483,10 @@ export default function App() {
       {/* Top Bar with Settings */}
       <div className="fixed top-0 left-0 right-0 p-4 flex justify-end z-50 pointer-events-none">
         <button 
-          onClick={() => setShowSettings(true)}
+          onClick={() => {
+            setPendingReset(null);
+            setShowSettings(true);
+          }}
           className="pointer-events-auto w-10 h-10 flex items-center justify-center transition-all opacity-20 hover:opacity-100 active:scale-95"
         >
           <Settings className="w-6 h-6" />
@@ -464,7 +500,10 @@ export default function App() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-[60] bg-[#1a1a1a]/80 backdrop-blur-sm flex items-center justify-center p-6"
-            onClick={() => setShowSettings(false)}
+            onClick={() => {
+              setPendingReset(null);
+              setShowSettings(false);
+            }}
           >
               <motion.div 
                 initial={{ scale: 0.9, y: 20 }}
@@ -475,71 +514,108 @@ export default function App() {
               >
                     <div className="flex justify-between items-center mb-8">
                       <h3 className="text-3xl font-black uppercase tracking-tighter">Settings</h3>
-                      <button onClick={() => setShowSettings(false)} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-gray-100 transition-colors">
+                      <button 
+                        onClick={() => {
+                          setPendingReset(null);
+                          setShowSettings(false);
+                        }} 
+                        className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-gray-100 transition-colors"
+                      >
                         <X className="w-8 h-8" />
                       </button>
                     </div>
 
                     <div className="space-y-4">
-                      {gameState !== 'welcome' && gameState !== 'setup' && (
-                        <button 
-                          onClick={() => {
-                            setPreviousGameState(gameState);
-                            setGameState('scoreboard');
-                            setShowSettings(false);
-                          }}
-                          className="w-full flex items-center gap-4 bg-emerald-50 text-emerald-600 p-4 rounded-3xl font-black uppercase tracking-tight text-lg border-4 border-emerald-200 hover:bg-emerald-100 transition-colors"
-                        >
-                          <Trophy className="w-6 h-6" />
-                          Scoreboard
-                        </button>
-                      )}
+                      {pendingReset === null ? (
+                        <>
+                          {(gameState !== 'welcome' && gameState !== 'setup' && gameState !== 'playing') && (
+                            <button 
+                              onClick={() => {
+                                setPreviousGameState(gameState);
+                                setGameState('scoreboard');
+                                setShowSettings(false);
+                              }}
+                              className="w-full flex items-center gap-4 bg-emerald-50 text-emerald-600 p-4 rounded-3xl font-black uppercase tracking-tight text-lg border-4 border-emerald-200 hover:bg-emerald-100 transition-colors"
+                            >
+                              <Trophy className="w-6 h-6" />
+                              Scoreboard
+                            </button>
+                          )}
 
-                      {gameState === 'playing' && (
-                        <button 
-                          onClick={restartCurrentRound}
-                          className="w-full flex items-center gap-4 bg-blue-50 text-blue-600 p-4 rounded-3xl font-black uppercase tracking-tight text-lg border-4 border-blue-200 hover:bg-blue-100 transition-colors"
-                        >
-                          <RefreshCw className="w-6 h-6" />
-                          Restart Round
-                        </button>
-                      )}
+                          {(gameState === 'playing' || gameState === 'confirming') && (
+                            <button 
+                              onClick={restartCurrentRound}
+                              className="w-full flex items-center gap-4 bg-blue-50 text-blue-600 p-4 rounded-3xl font-black uppercase tracking-tight text-lg border-4 border-blue-200 hover:bg-blue-100 transition-colors"
+                            >
+                              <RefreshCw className="w-6 h-6" />
+                              Restart Round
+                            </button>
+                          )}
 
-                      {gameState === 'round_end' && (
-                        <button 
-                          onClick={() => {
-                            setGameState('reconfiguring');
-                            setShowSettings(false);
-                          }}
-                          className="w-full flex items-center gap-4 bg-indigo-50 text-indigo-600 p-4 rounded-3xl font-black uppercase tracking-tight text-lg border-4 border-indigo-200 hover:bg-indigo-100 transition-colors"
-                        >
-                          <Users className="w-6 h-6" />
-                          Reconfigure Teams
-                        </button>
-                      )}
+                          {(gameState === 'round_end' && gameState !== 'playing') && (
+                            <button 
+                              onClick={() => {
+                                setGameState('reconfiguring');
+                                setShowSettings(false);
+                              }}
+                              className="w-full flex items-center gap-4 bg-indigo-50 text-indigo-600 p-4 rounded-3xl font-black uppercase tracking-tight text-lg border-4 border-indigo-200 hover:bg-indigo-100 transition-colors"
+                            >
+                              <Users className="w-6 h-6" />
+                              Reconfigure Teams
+                            </button>
+                          )}
 
-                      {gameState !== 'welcome' && gameState !== 'setup' && (
-                        <button 
-                          onClick={restartFullGame}
-                          className="w-full flex items-center gap-4 bg-orange-50 text-orange-600 p-4 rounded-3xl font-black uppercase tracking-tight text-lg border-4 border-orange-200 hover:bg-orange-100 transition-colors"
-                        >
-                          <PlayCircle className="w-6 h-6" />
-                          Restart Game
-                        </button>
-                      )}
+                          {(gameState !== 'welcome' && gameState !== 'setup' && gameState !== 'playing') && (
+                            <button 
+                              onClick={() => setPendingReset('game')}
+                              className="w-full flex items-center gap-4 bg-orange-50 text-orange-600 p-4 rounded-3xl font-black uppercase tracking-tight text-lg border-4 border-orange-200 hover:bg-orange-100 transition-colors"
+                            >
+                              <PlayCircle className="w-6 h-6" />
+                              Restart Game
+                            </button>
+                          )}
 
-                      {gameState !== 'welcome' && (
-                        <button 
-                          onClick={resetGame}
-                          className="w-full flex items-center gap-4 bg-red-50 text-red-600 p-4 rounded-3xl font-black uppercase tracking-tight text-lg border-4 border-red-200 hover:bg-red-100 transition-colors"
-                        >
-                          <LogOut className="w-6 h-6" />
-                          Quit to Title
-                        </button>
+                          {(gameState !== 'welcome' && gameState !== 'playing') && (
+                            <button 
+                              onClick={() => setPendingReset('title')}
+                              className="w-full flex items-center gap-4 bg-red-50 text-red-600 p-4 rounded-3xl font-black uppercase tracking-tight text-lg border-4 border-red-200 hover:bg-red-100 transition-colors"
+                            >
+                              <LogOut className="w-6 h-6" />
+                              Quit to Title
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        <div className="space-y-6 py-4 text-center">
+                          <div className="flex justify-center">
+                            <AlertTriangle className="w-20 h-20 text-red-500 animate-bounce" />
+                          </div>
+                          <div>
+                            <h4 className="text-2xl font-black uppercase tracking-tight text-red-600">Are you sure?</h4>
+                            <p className="text-sm font-bold opacity-60">You will lose all current points and game progress!</p>
+                          </div>
+                          <div className="flex flex-col gap-3">
+                            <button 
+                              onClick={() => pendingReset === 'game' ? restartFullGame() : resetGame()}
+                              className="w-full bg-red-600 text-white p-4 rounded-3xl font-black uppercase tracking-tight text-lg shadow-[0_6px_0_#991b1b] active:translate-y-1 active:shadow-none transition-all"
+                            >
+                              Yes, Reset Everything
+                            </button>
+                            <button 
+                              onClick={() => setPendingReset(null)}
+                              className="w-full bg-gray-100 text-gray-600 p-4 rounded-3xl font-black uppercase tracking-tight text-lg border-4 border-gray-200 active:translate-y-1 transition-all"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
                       )}
 
                       <button 
-                        onClick={() => setShowSettings(false)}
+                        onClick={() => {
+                          setPendingReset(null);
+                          setShowSettings(false);
+                        }}
                         className="w-full bg-[#1a1a1a] text-white p-4 rounded-3xl font-black uppercase tracking-tight text-lg shadow-[0_4px_0_#1a1a1a] active:translate-y-1 active:shadow-none transition-all mt-4"
                       >
                         Close
@@ -933,9 +1009,9 @@ function PlayView({ card, timeLeft, roundPoints, onNext, participantName, partic
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="h-full flex flex-col gap-4 overflow-y-auto pr-1"
+      className="h-full flex flex-col gap-4 overflow-y-auto pr-3 sm:pr-4"
     >
-      <div className="flex-shrink-0 flex justify-between items-center bg-white p-4 rounded-[1.5rem] border-[4px] border-[#1a1a1a] shadow-[8px_8px_0_0_#1a1a1a] mt-2">
+      <div className="flex-shrink-0 flex justify-between items-center bg-white p-4 rounded-[1.5rem] border-[4px] border-[#1a1a1a] shadow-[8px_8px_0_0_#1a1a1a] mt-2 mr-1 sm:mr-2">
         <div className="flex items-center gap-2">
           <Timer className={`w-6 h-6 ${timeLeft < 10 ? 'text-red-500 animate-bounce' : 'text-[#4F46E5]'}`} />
           <span className={`font-mono text-2xl font-black ${timeLeft < 10 ? 'text-red-500' : 'text-[#1a1a1a]'}`}>{timeLeft}s</span>
@@ -953,7 +1029,7 @@ function PlayView({ card, timeLeft, roundPoints, onNext, participantName, partic
         key={card.id}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.1 }}
-        className={`flex-1 min-h-[300px] bg-white border-[10px] border-[#1a1a1a] rounded-[3rem] flex flex-col overflow-hidden shadow-[8px_8px_0_0_#1a1a1a] relative transition-transform ${isPenaltyActive ? 'shake' : ''}`}
+        className={`flex-1 min-h-[300px] bg-white border-[10px] border-[#1a1a1a] rounded-[3rem] flex flex-col overflow-hidden shadow-[8px_8px_0_0_#1a1a1a] relative transition-transform mr-1 sm:mr-2 ${isPenaltyActive ? 'shake' : ''}`}
       >
         <div className="bg-[#1a1a1a] text-white p-3 text-center">
           <div className="text-[12px] uppercase font-black tracking-[0.3em]">NO BIG WORD</div>
