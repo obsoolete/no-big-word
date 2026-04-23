@@ -1,4 +1,4 @@
-# NO BIG WORD 🦖 (v1.0.0)
+# NO BIG WORD 🦖
 
 A hilarious, fast-paced word-guessing game where you must describe complex concepts using only single-syllable words!
 
