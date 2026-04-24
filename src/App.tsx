@@ -22,37 +22,50 @@ const getAudioContext = () => {
   return audioCtx;
 };
 
-const playSound = (type: 'tick' | 'buzzer' | 'penalty' | 'correct') => {
+const playSound = (type: 'tick' | 'buzzer' | 'penalty' | 'easy' | 'hard' | 'skip', urgency: number = 1) => {
   try {
     const ctx = getAudioContext();
     if (ctx.state === 'suspended') {
       ctx.resume().catch(err => console.warn('AudioContext resume failed:', err));
     }
     
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    
     const now = ctx.currentTime;
     
     if (type === 'tick') {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(880, now);
+      // Pitch increases as time runs out (urgency 1.0 to 1.6 approx)
+      const freq = 600 + (urgency * 400); 
+      osc.frequency.setValueAtTime(freq, now);
       gain.gain.setValueAtTime(0.1, now);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.1);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
       osc.start(now);
-      osc.stop(now + 0.1);
+      osc.stop(now + 0.08);
     } else if (type === 'buzzer') {
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(100, now);
-      osc.frequency.exponentialRampToValueAtTime(40, now + 0.5);
-      gain.gain.setValueAtTime(0.2, now);
-      gain.gain.linearRampToValueAtTime(0, now + 0.5);
-      osc.start(now);
-      osc.stop(now + 0.5);
+      // Alarm Beep Beep Beep
+      const duration = 0.15;
+      const gap = 0.1;
+      [0, 1, 2].forEach(i => {
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.connect(g);
+        g.connect(ctx.destination);
+        o.type = 'square';
+        o.frequency.setValueAtTime(880, now + i * (duration + gap));
+        g.gain.setValueAtTime(0, now + i * (duration + gap));
+        g.gain.linearRampToValueAtTime(0.1, now + i * (duration + gap) + 0.02);
+        g.gain.linearRampToValueAtTime(0, now + i * (duration + gap) + duration);
+        o.start(now + i * (duration + gap));
+        o.stop(now + i * (duration + gap) + duration);
+      });
     } else if (type === 'penalty') {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
       osc.type = 'square';
       osc.frequency.setValueAtTime(150, now);
       osc.frequency.exponentialRampToValueAtTime(50, now + 0.2);
@@ -60,14 +73,59 @@ const playSound = (type: 'tick' | 'buzzer' | 'penalty' | 'correct') => {
       gain.gain.linearRampToValueAtTime(0, now + 0.2);
       osc.start(now);
       osc.stop(now + 0.2);
-    } else if (type === 'correct') {
+    } else if (type === 'easy') {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
       osc.type = 'triangle';
-      osc.frequency.setValueAtTime(523.25, now); // C5
-      osc.frequency.exponentialRampToValueAtTime(1046.50, now + 0.2); // C6
-      gain.gain.setValueAtTime(0.1, now);
-      gain.gain.linearRampToValueAtTime(0, now + 0.2);
+      osc.frequency.setValueAtTime(659.25, now); // E5
+      osc.frequency.exponentialRampToValueAtTime(880, now + 0.15); // A5
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.15, now + 0.05);
+      gain.gain.linearRampToValueAtTime(0, now + 0.15);
       osc.start(now);
-      osc.stop(now + 0.2);
+      osc.stop(now + 0.15);
+    } else if (type === 'hard') {
+      // 3-part triumphant fanfare ding
+      const notes = [523.25, 659.25, 1046.50]; // C5, E5, C6
+      notes.forEach((f, i) => {
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.connect(g);
+        g.connect(ctx.destination);
+        o.type = 'sine';
+        o.frequency.setValueAtTime(f, now + i * 0.1);
+        g.gain.setValueAtTime(0, now + i * 0.1);
+        g.gain.linearRampToValueAtTime(0.1, now + i * 0.1 + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.1 + 0.2);
+        o.start(now + i * 0.1);
+        o.stop(now + i * 0.1 + 0.2);
+      });
+    } else if (type === 'skip') {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(600, now);
+      gain.gain.setValueAtTime(0.1, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+      
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(500, now + 0.07);
+      gain2.gain.setValueAtTime(0, now);
+      gain2.gain.setValueAtTime(0.1, now + 0.07);
+      gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+      
+      osc.start(now);
+      osc.stop(now + 0.05);
+      osc2.start(now + 0.07);
+      osc2.stop(now + 0.12);
     }
   } catch (e) {
     console.error('Audio play error:', e);
@@ -149,6 +207,18 @@ export default function App() {
   const [roundHistory, setRoundHistory] = useState<HistoryItem[]>([]);
   const [usedCardIds, setUsedCardIds] = useState<number[]>([]);
   const [previousGameState, setPreviousGameState] = useState<GameState | null>(null);
+
+  // Refs for stable callbacks
+  const cardsRef = useRef<CardItem[]>(cards);
+  const currentCardIndexRef = useRef<number>(currentCardIndex);
+
+  useEffect(() => {
+    cardsRef.current = cards;
+  }, [cards]);
+
+  useEffect(() => {
+    currentCardIndexRef.current = currentCardIndex;
+  }, [currentCardIndex]);
 
   // interaction listener for audio unlock
   useEffect(() => {
@@ -243,10 +313,13 @@ export default function App() {
   };
 
   const handleReconfigureComplete = (mode: GameMode, parts: Participant[], turnsPerTeam: number, duration: number, minTurns: number) => {
-    // Preserve existing scores and stats for existing participants
+    // Check if we came from game over
+    const wasGameOver = previousGameState === 'game_over';
+    
+    // Preserve existing scores and stats for existing participants ONLY if not coming from game over
     const updatedParts = parts.map(newP => {
       const existing = participants.find(p => p.id === newP.id);
-      if (existing) {
+      if (existing && !wasGameOver) {
         return {
           ...newP,
           score: existing.score,
@@ -255,7 +328,13 @@ export default function App() {
           playerStats: existing.playerStats || {}
         };
       }
-      return newP;
+      return {
+        ...newP,
+        score: 0,
+        totalCorrect: 0,
+        totalPenalties: 0,
+        playerStats: {}
+      };
     });
 
     setGameMode(mode);
@@ -264,14 +343,18 @@ export default function App() {
     setMinTurnsPerPlayer(minTurns);
     setRoundDuration(duration);
     
-    if (gameState === 'game_over') {
+    if (wasGameOver) {
       setRoundsPlayed(0);
       setCurrentParticipantIndex(0);
+      setUsedCardIds([]);
+      setRoundHistory([]);
+      setRoundPoints(0);
       setGameState('round_end');
     } else {
       setGameState('round_end'); 
     }
     
+    setPreviousGameState(null);
     setShowSettings(false);
   };
 
@@ -309,15 +392,16 @@ export default function App() {
     setRoundPoints(prev => prev + points);
     if (points === 1) {
       setRoundStats(prev => ({ ...prev, easy: prev.easy + 1 }));
-      playSound('correct');
+      playSound('easy');
       triggerFeedback('easy');
     } else if (points === 3) {
       setRoundStats(prev => ({ ...prev, hard: prev.hard + 1 }));
-      playSound('correct');
+      playSound('hard');
       triggerFeedback('hard');
     } else if (points < 0) {
       if (isSkip) {
         setRoundStats(prev => ({ ...prev, skip: prev.skip + 1 }));
+        playSound('skip');
         triggerFeedback('skip');
       } else {
         setRoundStats(prev => ({ ...prev, penalties: prev.penalties + 1 }));
@@ -338,20 +422,20 @@ export default function App() {
   };
 
   const endRound = useCallback(() => {
-    if (timerRef.current) clearInterval(timerRef.current);
+    setGameState('confirming');
     
     // Add current card to history as 'none' if it's not already handled
     setRoundHistory(prev => {
-      const currentCard = cards[currentCardIndex];
-      // Check if the card is already the last one in history to avoid doubles if button was pressed right at 0
+      const currentCard = cardsRef.current[currentCardIndexRef.current];
+      if (!currentCard) return prev;
+      
+      // Check if the card is already the last one in history to avoid doubles
       if (prev.length > 0 && prev[prev.length - 1].card.id === currentCard.id) {
         return prev;
       }
       return [...prev, { card: currentCard, result: 'none' }];
     });
-
-    setGameState('confirming');
-  }, [cards, currentCardIndex]);
+  }, []);
 
   const confirmRoundResults = (finalScore: number, finalEasy: number, finalHard: number, finalSkip: number, finalPenalties: number) => {
     setParticipants(prev => prev.map((p, idx) => {
@@ -401,29 +485,43 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (gameState === 'playing' && timeLeft > 0) {
-      timerRef.current = setInterval(() => {
-        setTimeLeft(prev => {
-          const nextTime = prev - 1;
-          if (nextTime <= 5 && nextTime > 0) {
-            playSound('tick');
-          }
-          return nextTime;
-        });
-      }, 1000);
-    } else if (timeLeft === 0 && gameState === 'playing') {
+    if (gameState !== 'playing') {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      return;
+    }
+    
+    timerRef.current = setInterval(() => {
+      setTimeLeft(prev => Math.max(0, prev - 1));
+    }, 1000);
+
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [gameState]);
+
+  useEffect(() => {
+    if (gameState === 'playing' && timeLeft <= 5 && timeLeft > 0) {
+      playSound('tick', (6 - timeLeft) / 5);
+    }
+    if (gameState === 'playing' && timeLeft === 0) {
       playSound('buzzer');
       endRound();
     }
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [gameState, timeLeft, endRound]);
+  }, [timeLeft, gameState, endRound]);
 
   const resetGame = () => {
     setParticipants([]);
     setCurrentParticipantIndex(0);
     setRoundsPlayed(0);
+    setUsedCardIds([]);
+    setRoundHistory([]);
+    setRoundPoints(0);
     setGameState('welcome');
     setShowSettings(false);
     localStorage.removeItem(SAVE_KEY);
@@ -433,6 +531,10 @@ export default function App() {
     setParticipants(prev => prev.map(p => ({ ...p, score: 0, totalCorrect: 0, totalPenalties: 0, playerStats: {} })));
     setRoundsPlayed(0);
     setCurrentParticipantIndex(0);
+    setUsedCardIds([]);
+    setRoundHistory([]);
+    setRoundPoints(0);
+    setRoundStats({ easy: 0, hard: 0, skip: 0, penalties: 0 });
     setGameState('round_end');
     setShowSettings(false);
   };
@@ -447,6 +549,10 @@ export default function App() {
     setParticipants(prev => prev.map(p => ({ ...p, score: 0, totalCorrect: 0, totalPenalties: 0, playerStats: {} })));
     setRoundsPlayed(0);
     setCurrentParticipantIndex(0);
+    setUsedCardIds([]);
+    setRoundHistory([]);
+    setRoundPoints(0);
+    setRoundStats({ easy: 0, hard: 0, skip: 0, penalties: 0 });
     setGameState('round_end');
     setShowSettings(false);
   };
@@ -528,7 +634,7 @@ export default function App() {
                     <div className="space-y-4">
                       {pendingReset === null ? (
                         <>
-                          {(gameState !== 'welcome' && gameState !== 'setup' && gameState !== 'playing') && (
+                          {(gameState !== 'welcome' && gameState !== 'game_over') && (
                             <button 
                               onClick={() => {
                                 setPreviousGameState(gameState);
@@ -552,9 +658,13 @@ export default function App() {
                             </button>
                           )}
 
-                          {(gameState === 'round_end' && gameState !== 'playing') && (
+                          {(gameState !== 'welcome' && gameState !== 'setup' && gameState !== 'game_over') && (
                             <button 
                               onClick={() => {
+                                if (gameState === 'playing' || gameState === 'confirming') {
+                                  confirmRoundResults(roundPoints, roundStats.easy, roundStats.hard, roundStats.skip, roundStats.penalties);
+                                }
+                                setPreviousGameState(gameState);
                                 setGameState('reconfiguring');
                                 setShowSettings(false);
                               }}
@@ -565,7 +675,7 @@ export default function App() {
                             </button>
                           )}
 
-                          {(gameState !== 'welcome' && gameState !== 'setup' && gameState !== 'playing') && (
+                          {(gameState !== 'welcome' && gameState !== 'game_over') && (
                             <button 
                               onClick={() => setPendingReset('game')}
                               className="w-full flex items-center gap-4 bg-orange-50 text-orange-600 p-4 rounded-3xl font-black uppercase tracking-tight text-lg border-4 border-orange-200 hover:bg-orange-100 transition-colors"
@@ -575,7 +685,7 @@ export default function App() {
                             </button>
                           )}
 
-                          {(gameState !== 'welcome' && gameState !== 'playing') && (
+                          {(gameState !== 'welcome') && (
                             <button 
                               onClick={() => setPendingReset('title')}
                               className="w-full flex items-center gap-4 bg-red-50 text-red-600 p-4 rounded-3xl font-black uppercase tracking-tight text-lg border-4 border-red-200 hover:bg-red-100 transition-colors"
@@ -707,7 +817,10 @@ export default function App() {
               participants={participants} 
               onReset={resetGame}
               onRematch={rematch}
-              onReconfigure={() => setGameState('reconfiguring')}
+              onReconfigure={() => {
+                setPreviousGameState('game_over');
+                setGameState('reconfiguring');
+              }}
             />
           )}
         </AnimatePresence>
@@ -741,7 +854,7 @@ function RoundConfirmationView({ participants, currentIdx, initialHistory, onCon
   participants: Participant[], 
   currentIdx: number, 
   initialHistory: HistoryItem[], 
-  onConfirm: (score: number, easy: number, hard: number, skip: number, penalties: number) => void 
+  onConfirm: (score: number, easy: number, hard: number, skip: number, penalties: number) => void
 }) {
   const [history, setHistory] = useState<HistoryItem[]>(initialHistory);
   const currentP = participants[currentIdx];
@@ -868,12 +981,16 @@ function RoundConfirmationView({ participants, currentIdx, initialHistory, onCon
         <div className="h-2" />
       </div>
 
-      <button 
-        onClick={() => onConfirm(stats.score, stats.easy, stats.hard, stats.skip, stats.penalties)}
-        className="flex-shrink-0 bg-[#1a1a1a] text-white py-6 rounded-full font-black text-2xl uppercase tracking-tighter shadow-[0_8px_0_0_#1a1a1a] active:translate-y-2 active:shadow-none transition-all flex items-center justify-center gap-2 border-2 border-white mb-2 mt-auto"
+      <motion.div 
+        className="flex-shrink-0 flex flex-col gap-3 mb-2 mt-auto"
       >
-        Confirm Score <ChevronRight className="w-6 h-6" />
-      </button>
+        <button 
+          onClick={() => onConfirm(stats.score, stats.easy, stats.hard, stats.skip, stats.penalties)}
+          className="bg-[#1a1a1a] text-white py-5 rounded-full font-black text-2xl uppercase tracking-tighter shadow-[0_8px_0_0_#1a1a1a] active:translate-y-2 active:shadow-none transition-all flex items-center justify-center gap-2 border-2 border-white"
+        >
+          Confirm Score <ChevronRight className="w-6 h-6" />
+        </button>
+      </motion.div>
     </motion.div>
   );
 }
@@ -1187,7 +1304,7 @@ function GameOverView({ participants, onReset, onRematch, onReconfigure }: {
           onClick={onReconfigure}
           className="bg-[#6366f1] text-white py-4 rounded-3xl font-black uppercase tracking-tight text-lg shadow-[0_6px_0_#3730a3] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2 border-2 border-white"
         >
-          <Settings className="w-5 h-5" /> Edit
+          <Settings className="w-5 h-5" /> Edit & Rematch
         </button>
       </div>
 
